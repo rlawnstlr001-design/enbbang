@@ -1,12 +1,12 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610011652';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011652';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011652';
+} from './settle.js?v=202610011705';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011705';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011705';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610011652';
+} from './share.js?v=202610011705';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
