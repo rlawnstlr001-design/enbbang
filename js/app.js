@@ -62,7 +62,7 @@ function renderHome() {
       <label class="field"><span>여행 이름</span>
         <input class="input" name="name" maxlength="60" placeholder="예: 10월 오사카 3박4일" required></label>
       <label class="field"><span>함께 가는 사람 (쉼표로 구분, 첫 번째가 나)</span>
-        <input class="input" name="names" placeholder="준식, 민수, 지영" required></label>
+        <input class="input" name="names" placeholder="지훈, 민수, 지영" required></label>
       <label class="field"><span>정산 통화</span>
         <select class="input" name="base">${CURRENCIES.map((c) => `<option ${c === 'KRW' ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <button class="btn primary block">여행방 만들기</button>
@@ -350,9 +350,9 @@ function payInfoSheet(p) {
     <h2>내 송금 정보</h2>
     <p class="muted small">받을 돈이 있을 때 친구 화면에 송금 버튼으로 보여요. 필요한 것만 넣으세요.</p>
     <form class="stack" id="pi">
-      <label class="field"><span>토스아이디 (toss.me/뒤의 아이디)</span><input class="input" name="toss" value="${esc(i.toss)}" placeholder="예: junsik"></label>
+      <label class="field"><span>토스아이디 (toss.me/뒤의 아이디)</span><input class="input" name="toss" value="${esc(i.toss)}" placeholder="예: mytossid"></label>
       <label class="field"><span>카카오페이 송금코드 링크</span><input class="input" name="kakao" value="${esc(i.kakao)}" placeholder="https://qr.kakaopay.com/..."></label>
-      <label class="field"><span>계좌 (은행 계좌번호 예금주)</span><input class="input" name="account" value="${esc(i.account)}" placeholder="카카오뱅크 3333-01-1234567 김준식"></label>
+      <label class="field"><span>계좌 (은행 계좌번호 예금주)</span><input class="input" name="account" value="${esc(i.account)}" placeholder="카카오뱅크 3333-01-1234567 홍길동"></label>
       <p class="muted small">링크를 받은 사람은 모두 이 정보를 볼 수 있어요.</p>
       <div class="row"><button type="button" class="btn grow" id="cancel">취소</button><button class="btn primary grow">저장</button></div>
     </form>`, (el) => {
