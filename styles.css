@@ -174,3 +174,29 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
 .fx details summary { color: var(--accent-ink); font-weight: 700; padding: 6px 0; }
 .fx p { margin: 6px 0 0; }
 .link-btn { padding: 4px 6px; margin: 0 1px; }
+
+/* ── P1 나머지 (2026-10-01) ── */
+#toast { display: flex; gap: 12px; align-items: center; }
+#toast.has-action { pointer-events: auto; }
+#toast button { border: 0; background: transparent; color: var(--accent); font-weight: 800; font-size: 14px; padding: 6px 4px; min-height: 36px; cursor: pointer; }
+.cats { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.cats::-webkit-scrollbar { display: none; }
+.cat { flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 8px 12px; min-height: 40px;
+  font-weight: 700; font-size: 14px; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.cat[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.cat-ico { width: 36px; height: 36px; flex: none; display: grid; place-items: center; background: var(--surface-2); border-radius: 10px; font-size: 18px; }
+.cat-card b { display: block; margin-bottom: 8px; }
+.cat-bar { display: grid; grid-template-columns: 76px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; font-size: 14px; }
+.cat-bar .bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.cat-bar .bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.cat-amt { text-align: right; white-space: nowrap; font-weight: 700; }
+.member { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.member.off .t { color: var(--muted); }
+.member-ctl { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.step.sm { width: 36px; height: 36px; font-size: 16px; }
+.chip.sm { min-height: 36px; padding: 6px 12px; font-size: 13px; }
+.grow-end { margin-left: auto; }
+.members:empty { display: none; }
+.member-chip { display: inline-flex; align-items: center; gap: 4px; cursor: default; padding-right: 6px; }
+.member-chip small { color: var(--accent-ink); font-weight: 800; }
+.member-chip button { border: 0; background: transparent; font-size: 18px; line-height: 1; width: 28px; height: 28px; cursor: pointer; color: var(--muted); }

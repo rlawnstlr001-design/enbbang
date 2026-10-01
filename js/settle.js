@@ -127,6 +127,46 @@ export function minTransfers(balances) {
   return { transfers, optimal: true };
 }
 
+// ───── 카테고리 ─────
+export const CATEGORIES = [
+  { id: 'food', emoji: '🍜', label: '식비' },
+  { id: 'transport', emoji: '🚕', label: '교통' },
+  { id: 'stay', emoji: '🏨', label: '숙소' },
+  { id: 'activity', emoji: '🎫', label: '관광' },
+  { id: 'shopping', emoji: '🛍', label: '쇼핑' },
+  { id: 'etc', emoji: '✨', label: '기타' },
+];
+
+const CAT_WORDS = {
+  transport: /택시|버스|지하철|전철|기차|ktx|srt|열차|렌터카|렌트|주유|기름|톨게이트|통행료|주차|항공|비행기|공항|페리|배편|스이카|교통|taxi|uber|grab|train|bus/i,
+  stay: /호텔|숙소|숙박|에어비앤비|airbnb|펜션|게스트하우스|게하|리조트|료칸|모텔|민박|hotel|hostel/i,
+  food: /식|밥|저녁|점심|아침|브런치|카페|커피|술|맥주|소주|와인|이자카야|라멘|스시|초밥|고기|삼겹|치킨|피자|간식|디저트|빵|편의점|마트|장보|음료|food|dinner|lunch|cafe|beer/i,
+  activity: /입장|티켓|투어|관광|체험|박물관|미술관|공연|테마파크|유니버설|디즈니|액티비티|스노클|다이빙|온천|입장료|ticket|tour/i,
+  shopping: /쇼핑|면세|기념품|선물|옷|화장품|돈키|드럭|아울렛|shopping|souvenir/i,
+};
+
+// 내용으로 카테고리 추측 (사용자가 직접 고르면 그게 우선)
+export function guessCategory(title) {
+  for (const id of ['transport', 'stay', 'activity', 'shopping', 'food']) {
+    if (CAT_WORDS[id].test(title || '')) return id;
+  }
+  return null;
+}
+
+// 카테고리별 지출 합계(기준 통화 최소 단위). 송금 기록은 제외.
+export function categoryTotals(trip) {
+  const sums = new Map();
+  for (const e of trip.expenses) {
+    if (e.deletedAt || e.kind === 'transfer') continue;
+    let v;
+    try { v = expenseBaseMinor(e, trip.baseCurrency); } catch { continue; }
+    const k = e.category || 'etc';
+    sums.set(k, (sums.get(k) || 0) + v);
+  }
+  return CATEGORIES.filter((c) => sums.has(c.id)).map((c) => ({ ...c, total: sums.get(c.id) }))
+    .sort((a, b) => b.total - a.total);
+}
+
 // "낸 사람에게 직접 갚기" — 지출마다 생긴 빚을 사람 쌍별로 상계만 한다(제3자 경유 없음).
 export function directTransfers(trip, pays = []) {
   const base = trip.baseCurrency;

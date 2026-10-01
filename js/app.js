@@ -1,10 +1,12 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
-import { settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor } from './settle.js?v=202610011545';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011545';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011545';
 import {
-  encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks,
-} from './share.js?v=202610011545';
+  settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
+} from './settle.js?v=202610011611';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011611';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011611';
+import {
+  encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
+} from './share.js?v=202610011611';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -18,12 +20,23 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const today = () => new Date().toLocaleDateString('sv-SE');
 const parseAmount = (s) => Number(String(s).replace(/[,\s]/g, ''));
 
-function toast(msg) {
+// action = { label, run } 이면 버튼을 달고 5초 보여준다 (되돌리기 등)
+function toast(msg, action) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
+  t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button">${esc(action.label)}</button>` : ''}`;
+  if (action) {
+    t.querySelector('button').onclick = () => { t.classList.remove('on'); action.run(); };
+  }
+  t.classList.toggle('has-action', !!action);
   t.classList.add('on');
   clearTimeout(toast.h);
-  toast.h = setTimeout(() => t.classList.remove('on'), 2200);
+  toast.h = setTimeout(() => t.classList.remove('on'), action ? 5000 : 2200);
+}
+
+// 지운 지출 되살리기 (지운 사람이 5초 안에 "되돌리기"를 누른 경우)
+async function restoreExpense(tripId, eid, msg) {
+  try { await store.updateExpense(tripId, eid, { deletedAt: null }); await refreshTrip(); toast(msg); }
+  catch (err) { report(err); }
 }
 
 async function copy(text, msg = '복사했어요') {
@@ -97,8 +110,12 @@ function renderHome() {
     <form class="card stack" id="create">
       <label class="field"><span>여행 이름</span>
         <input class="input" name="name" maxlength="60" placeholder="예: 10월 오사카 3박4일" required></label>
-      <label class="field"><span>함께 가는 사람 (쉼표로 구분, 첫 번째가 나)</span>
-        <input class="input" name="names" placeholder="지훈, 민수, 지영" required></label>
+      <div class="field"><span>함께 가는 사람</span>
+        <div class="chips members" id="members"></div>
+        <div class="row" style="margin-top:8px">
+          <input class="input grow" id="mname" maxlength="30" placeholder="내 이름부터 입력" enterkeyhint="done" autocomplete="off">
+          <button type="button" class="btn" id="madd">＋ 추가</button>
+        </div></div>
       <label class="field"><span>정산 통화</span>
         <select class="input" name="base">${CURRENCIES.map((c) => `<option ${c === 'KRW' ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <button class="btn primary block">여행방 만들기</button>
@@ -110,11 +127,40 @@ function renderHome() {
       : '로컬 모드: 이 기기에만 저장돼요. 공유 링크에는 그 시점의 내용이 담겨요.'}
       · <a href="privacy.html">개인정보처리방침</a></p>`;
 
+  // 멤버 칩 입력: 이름 하나씩 추가(쉼표로 여러 명 붙여 넣어도 됨), ×로 빼기, 첫 번째가 "나"
+  const members = [];
+  const mInput = $app.querySelector('#mname');
+  const renderMembers = () => {
+    $app.querySelector('#members').innerHTML = members.map((n, i) =>
+      `<span class="chip member-chip">${esc(n)}${i === 0 ? ' <small>나</small>' : ''}<button type="button" data-rm="${i}" aria-label="${esc(n)} 빼기">×</button></span>`).join('');
+    $app.querySelectorAll('[data-rm]').forEach((b) => {
+      b.onclick = () => { members.splice(+b.dataset.rm, 1); renderMembers(); };
+    });
+    mInput.placeholder = members.length ? '함께 가는 사람 이름' : '내 이름부터 입력';
+  };
+  const addMembers = () => {
+    const names = mInput.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+    for (const n of names) {
+      if (members.includes(n)) { toast(`${n}님은 이미 있어요`); continue; }
+      if (members.length >= 30) { toast('최대 30명까지예요'); break; }
+      members.push(n.slice(0, 30));
+    }
+    mInput.value = '';
+    renderMembers();
+    mInput.focus();
+  };
+  $app.querySelector('#madd').onclick = addMembers;
+  mInput.onkeydown = (ev) => {
+    if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); addMembers(); }
+  };
+  renderMembers();
+
   $app.querySelector('#create').onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const names = [...new Set(String(f.get('names')).split(/[,\n]/).map((s) => s.trim()).filter(Boolean))];
-    if (!names.length) return toast('함께 가는 사람을 적어 주세요');
+    if (mInput.value.trim()) addMembers(); // 입력해 두고 추가를 안 누른 이름도 챙긴다
+    const names = [...members];
+    if (!names.length) { mInput.focus(); return toast('함께 가는 사람을 적어 주세요'); }
     if (names.length > 30) return toast('최대 30명까지예요');
     e.target.querySelector('button').disabled = true;
     try {
@@ -246,7 +292,9 @@ function renderList(body, t) {
       }
       const mode = splitModeOf(e.shares);
       const who = `${e.shares.length === t.participants.length ? '전원' : `${e.shares.length}명`}${mode === 'parts' ? ' · 몫대로' : mode === 'exact' ? ' · 금액 지정' : ''}`;
+      const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES.find((c) => c.id === 'etc');
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
+        <span class="cat-ico" aria-label="${cat.label}">${cat.emoji}</span>
         <div class="grow"><div class="t">${esc(e.title)}</div>
           <div class="muted small">${esc(nameOf(t, e.payerId))} 결제 · ${who}</div></div>
         <div class="amt num">${fmtMajor(e.amount, e.currency)}${baseLine}</div></div>`;
@@ -296,9 +344,13 @@ function bindInviteCard(body, t) {
 
 async function undoTransfer(t, tid) {
   const e = t.expenses.find((x) => x.id === tid);
-  if (!e || !confirm(`${nameOf(t, e.payerId)} → ${nameOf(t, e.shares[0]?.pid)} 송금 기록을 취소할까요?`)) return;
-  try { await store.deleteExpense(t.id, tid); await refreshTrip(); toast('송금 기록을 취소했어요'); }
-  catch (err) { report(err); }
+  if (!e) return;
+  try {
+    await store.deleteExpense(t.id, tid);
+    await refreshTrip();
+    toast(`${nameOf(t, e.payerId)} → ${nameOf(t, e.shares[0]?.pid)} 송금 기록을 취소했어요`,
+      { label: '되돌리기', run: () => restoreExpense(t.id, tid, '송금 기록을 되살렸어요') });
+  } catch (err) { report(err); }
 }
 
 function renderSettle(body, t, result) {
@@ -320,6 +372,7 @@ function renderSettle(body, t, result) {
         ${x.done
           ? `<span class="paid">✓ 보냈어요</span><button class="btn sm ghost" data-undo="${i}">취소</button>`
           : `<button class="btn sm send" data-paid="${i}">보냈어요 ✓</button>
+             <button class="btn sm ghost" data-remind="${i}">🔔 리마인드</button>
              <button class="btn sm ghost" data-copy-amt="${i}">금액 복사</button>
              ${links.map((l, j) => l.href
                ? `<a class="btn sm ghost" href="${esc(l.href)}" target="_blank" rel="noopener" data-paylink="${l.kind}">${l.label}${l.over ? ' (한도 30만)' : ''}</a>`
@@ -342,11 +395,13 @@ function renderSettle(body, t, result) {
       ${!result.transfers.length ? '<div class="empty">아직 정산할 게 없어요</div>' : ''}
       ${pending.map(row).join('')}
       ${done.map(row).join('')}
+      ${pending.length > 1 ? '<button class="btn ghost block" id="remind-all" style="margin-top:12px">🔔 안 보낸 사람 모두에게 알림 복사</button>' : ''}
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn primary grow" id="share-text">카톡용 복사</button>
       <button class="btn grow" id="share-img">이미지로 공유</button>
     </div>
+    ${catCard(t, result.totalSpent)}
     <details class="card" style="margin-top:12px"><summary>계산 근거 보기</summary>
       <table class="basis num"><thead><tr><th>이름</th><th>낸 돈</th><th>쓴 몫</th><th>송금</th><th>남은 차액</th></tr></thead><tbody>
       ${result.balances.map((b) => `<tr><td>${esc(nameOf(t, b.pid))}</td><td>${fmt(b.paid, cur)}</td><td>${fmt(b.owed, cur)}</td>
@@ -384,6 +439,15 @@ function renderSettle(body, t, result) {
   body.querySelectorAll('[data-undo]').forEach((b) => {
     b.onclick = () => undoTransfer(t, result.transfers[+b.dataset.undo].paymentId);
   });
+  const remind = async (list, msg) => {
+    copy(reminderText(t, list, (pid) => nameOf(t, pid), await tripLink(t)), msg);
+    store.logEvent(t.id, 'reminder_copied', { count: list.length });
+  };
+  body.querySelectorAll('[data-remind]').forEach((b) => {
+    const x = result.transfers[+b.dataset.remind];
+    b.onclick = () => remind([x], `${nameOf(t, x.from)}님에게 보낼 알림을 복사했어요. 카톡에 붙여 넣으세요`);
+  });
+  body.querySelector('#remind-all')?.addEventListener('click', () => remind(pending, '안 보낸 사람 모두에게 보낼 알림을 복사했어요'));
   body.querySelectorAll('[data-copy-amt]').forEach((b) => {
     b.onclick = () => copy(String(result.transfers[+b.dataset.copyAmt].amount / 10 ** decimalsOf(cur)), '금액을 복사했어요');
   });
@@ -417,6 +481,20 @@ function renderSettle(body, t, result) {
   };
 }
 
+// 어디에 썼나 — 카테고리별 합계 막대
+function catCard(t, total) {
+  const cats = categoryTotals(t);
+  if (!cats.length || !total) return '';
+  return `<div class="card cat-card" style="margin-top:12px"><b>어디에 썼나요</b>
+    ${cats.map((c) => {
+      const pct = Math.round((c.total / total) * 100);
+      return `<div class="cat-bar"><span class="cat-name">${c.emoji} ${c.label}</span>
+        <span class="bar"><i style="width:${Math.max(pct, 2)}%"></i></span>
+        <span class="num cat-amt">${fmt(c.total, t.baseCurrency)} <span class="muted">${pct}%</span></span></div>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderPeople(body, t) {
   const myId = me.get(t.id);
   body.innerHTML = `
@@ -424,17 +502,46 @@ function renderPeople(body, t) {
       ${t.participants.map((p) => {
         const i = p.payInfo || {};
         const has = [i.toss && '토스', i.kakao && '카카오페이', i.account && '계좌'].filter(Boolean).join('·');
-        return `<div class="exp" data-pid="${esc(p.id)}"><div class="grow"><div class="t">${esc(p.name)}${p.id === myId ? ' <span class="badge">나</span>' : ''}</div>
-          <div class="muted small">${has ? `송금 정보: ${has}` : '송금 정보 없음'}</div></div>
-          ${p.id === myId ? '<span class="btn sm">내 정보</span>' : ''}</div>`;
+        const w = p.defaultW ?? 1;
+        return `<div class="member ${p.excluded ? 'off' : ''}">
+          <div class="row">
+            <div class="grow"><div class="t">${esc(p.name)}${p.id === myId ? ' <span class="badge">나</span>' : ''}${p.excluded ? ' <span class="badge">이후 제외</span>' : ''}</div>
+              <div class="muted small">${has ? `송금 정보: ${has}` : '송금 정보 없음'}</div></div>
+            ${p.id === myId ? `<button class="btn sm" data-payinfo="${esc(p.id)}">내 송금 정보</button>` : ''}
+          </div>
+          <div class="member-ctl small">
+            <span class="muted">기본 몫</span>
+            <button type="button" class="step sm" data-wdec="${esc(p.id)}" aria-label="${esc(p.name)} 기본 몫 줄이기">−</button>
+            <b class="num">${w}</b>
+            <button type="button" class="step sm" data-winc="${esc(p.id)}" aria-label="${esc(p.name)} 기본 몫 늘리기">＋</button>
+            <button type="button" class="chip sm grow-end" data-excl="${esc(p.id)}" aria-pressed="${!p.excluded}">${p.excluded ? '새 지출에서 빠짐' : '새 지출에 포함'}</button>
+          </div>
+        </div>`;
       }).join('')}
+      <p class="muted small">기본 몫은 커플처럼 늘 2인분인 사람에게 2를 주세요. 중간에 먼저 떠난 사람은 "새 지출에서 빠짐"으로 바꾸면 지난 기록은 그대로 두고 이후 지출에서만 빠져요.</p>
       <form id="addp" class="row" style="margin-top:12px">
         <input class="input grow" name="n" maxlength="30" placeholder="사람 추가">
         <button class="btn">추가</button></form>
     </div>
     <button class="btn ghost block" id="whoami" style="margin-top:12px">내가 누구인지 다시 고르기</button>`;
-  body.querySelectorAll('[data-pid]').forEach((el) => {
-    if (el.dataset.pid === myId) el.onclick = () => payInfoSheet(t.participants.find((p) => p.id === myId));
+  body.querySelector('[data-payinfo]')?.addEventListener('click', () => payInfoSheet(t.participants.find((p) => p.id === myId)));
+  const patch = async (pid, data) => {
+    try { await store.updateParticipant(t.id, pid, data); await refreshTrip(); } catch (err) { report(err); }
+  };
+  body.querySelectorAll('[data-wdec]').forEach((b) => {
+    const p = t.participants.find((x) => x.id === b.dataset.wdec);
+    b.onclick = () => (p.defaultW ?? 1) > 1 && patch(p.id, { defaultW: (p.defaultW ?? 1) - 1 });
+  });
+  body.querySelectorAll('[data-winc]').forEach((b) => {
+    const p = t.participants.find((x) => x.id === b.dataset.winc);
+    b.onclick = () => (p.defaultW ?? 1) < 9 && patch(p.id, { defaultW: (p.defaultW ?? 1) + 1 });
+  });
+  body.querySelectorAll('[data-excl]').forEach((b) => {
+    const p = t.participants.find((x) => x.id === b.dataset.excl);
+    b.onclick = () => {
+      if (!p.excluded && t.participants.filter((x) => !x.excluded).length <= 1) return toast('한 명은 남아 있어야 해요');
+      patch(p.id, { excluded: !p.excluded });
+    };
   });
   body.querySelector('#addp').onsubmit = async (e) => {
     e.preventDefault();
@@ -532,7 +639,9 @@ function expenseSheet(exp) {
   const canEdit = !editing || exp.device === deviceId() || isAdmin(t);
   const e = exp || {
     title: '', date: today(), amount: '', currency: lastCurrency(t), rate: '', baseOverride: '',
-    payerId: myId || t.participants[0].id, shares: t.participants.map((p) => ({ pid: p.id, w: 1 })),
+    payerId: myId || t.participants[0].id,
+    // 새 지출 기본값: "이후 제외"된 사람은 빼고, 각자의 기본 몫(커플 2 등)을 쓴다
+    shares: t.participants.filter((p) => !p.excluded).map((p) => ({ pid: p.id, w: p.defaultW ?? 1 })),
   };
   const people = t.participants;
   const st = {
@@ -542,6 +651,8 @@ function expenseSheet(exp) {
     parts: new Map(people.map((p) => [p.id, e.shares.find((s) => s.pid === p.id)?.w ?? 0])),
     exact: new Map(people.map((p) => [p.id, String(e.shares.find((s) => s.pid === p.id)?.a ?? '')])),
     open: null,
+    cat: e.category || guessCategory(e.title),
+    catTouched: !!e.category, // 사용자가 직접 고르면 제목으로 추측하지 않는다
   };
   if (st.mode !== 'parts') people.forEach((p) => st.parts.set(p.id, st.sel.has(p.id) ? 1 : 0));
 
@@ -553,6 +664,8 @@ function expenseSheet(exp) {
         <select class="input cur" name="currency" aria-label="통화">${CURRENCIES.map((c) => `<option ${c === e.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>
       </div>
       <input class="input" name="title" maxlength="100" value="${esc(e.title)}" placeholder="어디에 썼나요? 예: 저녁 이자카야" aria-label="내용" required>
+      <div class="cats" role="radiogroup" aria-label="카테고리">${CATEGORIES.map((c) =>
+        `<button type="button" class="cat" role="radio" data-cat="${c.id}"><span>${c.emoji}</span>${c.label}</button>`).join('')}</div>
       <div id="fx" class="fx ${e.currency === t.baseCurrency ? 'hidden' : ''}">
         <label class="fx-row"><span id="rate-label">환율</span>
           <input class="input num fx-rate" name="rate" inputmode="decimal" value="${esc(e.rate)}"><span class="muted">${t.baseCurrency}</span></label>
@@ -671,6 +784,21 @@ function expenseSheet(exp) {
 
     const refresh = () => { renderSummary(); renderSplit(); };
 
+    const renderCats = () => {
+      el.querySelectorAll('[data-cat]').forEach((b) => b.setAttribute('aria-checked', b.dataset.cat === st.cat));
+    };
+    el.querySelectorAll('[data-cat]').forEach((b) => {
+      b.onclick = () => {
+        st.cat = st.cat === b.dataset.cat ? null : b.dataset.cat; // 다시 누르면 해제
+        st.catTouched = true;
+        renderCats();
+      };
+    });
+    f.title.oninput = () => {
+      if (!st.catTouched) { st.cat = guessCategory(f.title.value); renderCats(); }
+    };
+    renderCats();
+
     el.querySelectorAll('[data-split]').forEach((b) => {
       b.onclick = () => {
         const next = b.dataset.split;
@@ -723,9 +851,12 @@ function expenseSheet(exp) {
     el.querySelector('#cancel').onclick = closeSheet;
     const del = el.querySelector('#del');
     if (del) del.onclick = async () => {
-      if (!confirm('이 지출을 지울까요?')) return;
-      try { await store.deleteExpense(t.id, exp.id); view.trip = await store.getTrip(t.id); closeSheet(); renderTrip(); toast('지웠어요'); }
-      catch (err) { report(err); }
+      try {
+        await store.deleteExpense(t.id, exp.id);
+        view.trip = await store.getTrip(t.id);
+        closeSheet(); renderTrip();
+        toast(`'${exp.title}' 지출을 지웠어요`, { label: '되돌리기', run: () => restoreExpense(t.id, exp.id, '지출을 되살렸어요') });
+      } catch (err) { report(err); }
     };
     updateFx(); refresh();
     if (!editing) setTimeout(() => f.amount.focus(), 50); // 금액부터 바로 입력
@@ -753,7 +884,7 @@ function expenseSheet(exp) {
         title: f.title.value.trim(), date: f.date.value || today(), amount, currency: c,
         rate: c === t.baseCurrency ? null : parseAmount(f.rate.value) || null,
         baseOverride: c === t.baseCurrency || !f.baseOverride.value.trim() ? null : parseAmount(f.baseOverride.value),
-        payerId: st.payerId, shares,
+        payerId: st.payerId, shares, category: st.cat,
       };
       if (c !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
       try {

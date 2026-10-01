@@ -1,6 +1,6 @@
 // 공유 — 로컬 모드 스냅샷 링크 / 카톡 붙여넣기용 텍스트 / 세로 이미지 카드 / 송금 링크
 
-import { fromMinor } from './settle.js?v=202610011545';
+import { fromMinor } from './settle.js?v=202610011611';
 
 // ───── 스냅샷 (로컬 모드 전용: 링크 안에 방 전체를 압축해 담는다) ─────
 const b64url = {
@@ -60,6 +60,21 @@ export function settlementText(trip, result, nameOf) {
     for (const t of done) lines.push(`${nameOf(t.from)} → ${nameOf(t.to)}  ${fmt(t.amount, cur)}`);
   }
   lines.push('', `총 지출 ${fmt(result.totalSpent, cur)} · 남은 송금 ${result.pending.length}번`, '엔빵으로 계산했어요');
+  return lines.join('\n');
+}
+
+// 아직 안 보낸 사람에게 보낼 카톡 리마인드 (한 건 또는 여러 건)
+export function reminderText(trip, transfers, nameOf, link) {
+  const cur = trip.baseCurrency;
+  const lines = [`🔔 '${trip.name}' 정산이 남았어요`, ''];
+  for (const t of transfers) {
+    lines.push(`${nameOf(t.from)} → ${nameOf(t.to)}  ${fmt(t.amount, cur)}`);
+    const to = trip.participants.find((p) => p.id === t.to);
+    const i = to?.payInfo || {};
+    if (i.toss && cur === 'KRW') lines.push(`   토스로 보내기 https://toss.me/${i.toss}/${t.amount}`);
+    else if (i.account) lines.push(`   계좌 ${i.account}`);
+  }
+  lines.push('', '보내고 나서 정산표에서 "보냈어요 ✓"를 눌러 주세요', link);
   return lines.join('\n');
 }
 
