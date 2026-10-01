@@ -57,8 +57,8 @@ export class LocalStore {
   async createTrip({ name, baseCurrency, names }) {
     const id = uid(16);
     const t = {
-      id, name, baseCurrency, createdAt: new Date().toISOString(), settledAt: null,
-      participants: names.map((n) => ({ id: uid(8), name: n, payInfo: {} })),
+      id, name, baseCurrency, createdAt: new Date().toISOString(), settledAt: null, settleMode: 'min',
+      participants: names.map((n) => ({ id: uid(8), name: n, payInfo: {}, joinedAt: null })),
       expenses: [],
     };
     me.setAdminKey(id, 'local');
@@ -74,7 +74,7 @@ export class LocalStore {
   }
   async addParticipant(id, name) {
     const t = this.#load(id);
-    const p = { id: uid(8), name, payInfo: {} };
+    const p = { id: uid(8), name, payInfo: {}, joinedAt: null };
     t.participants.push(p);
     this.#save(t);
     return p;
@@ -102,8 +102,19 @@ export class LocalStore {
     t.settledAt = on ? new Date().toISOString() : null;
     this.#save(t);
   }
+  async claimParticipant(id, pid) {
+    const t = this.#load(id);
+    const p = t.participants.find((x) => x.id === pid);
+    if (p && !p.joinedAt) { p.joinedAt = new Date().toISOString(); this.#save(t); }
+  }
+  async setSettleMode(id, mode) {
+    const t = this.#load(id);
+    t.settleMode = mode;
+    this.#save(t);
+  }
   async logEvent() { /* 로컬 모드는 지표를 모으지 않는다 */ }
-  subscribe(id, cb) {
+  subscribe(id, cb, onStatus) {
+    onStatus?.('SUBSCRIBED');
     const arr = this.#subs.get(id) || [];
     arr.push(cb);
     this.#subs.set(id, arr);
@@ -176,13 +187,22 @@ export class CloudStore {
     await this.#rpc('enb_mark_settled', { p_trip: id, p_on: on, p_admin: me.adminKey(id) || '' });
     this.#ping(id);
   }
+  async claimParticipant(id, pid) {
+    await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid });
+    this.#ping(id);
+  }
+  async setSettleMode(id, mode) {
+    await this.#rpc('enb_set_settle_mode', { p_trip: id, p_mode: mode, p_device: deviceId() });
+    this.#ping(id);
+  }
   async logEvent(id, type, meta = {}) {
     try { await this.#rpc('enb_log_event', { p_trip: id, p_type: type, p_device: deviceId(), p_meta: meta }); }
     catch { /* 지표 실패가 사용을 막으면 안 된다 */ }
   }
-  subscribe(id, cb) {
+  // onStatus: 'SUBSCRIBED' | 'CHANNEL_ERROR' | 'TIMED_OUT' | 'CLOSED' — 끊김 표시용
+  subscribe(id, cb, onStatus) {
     const ch = this.#sb.channel(`enb:${id}`, { config: { broadcast: { self: false } } });
-    ch.on('broadcast', { event: 'changed' }, () => cb()).subscribe();
+    ch.on('broadcast', { event: 'changed' }, () => cb()).subscribe((status) => onStatus?.(status));
     this.#channels.set(id, ch);
     return () => { this.#sb.removeChannel(ch); this.#channels.delete(id); };
   }

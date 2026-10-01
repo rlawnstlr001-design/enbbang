@@ -52,7 +52,7 @@ export function computeBalances(trip) {
   const base = trip.baseCurrency;
   const bal = new Map(trip.participants.map((p) => [p.id, { paid: 0, owed: 0 }]));
   for (const exp of trip.expenses) {
-    if (exp.deletedAt) continue;
+    if (exp.deletedAt || exp.kind === 'transfer') continue;
     const shares = (exp.shares || []).filter((s) => bal.has(s.pid) && s.w > 0);
     if (!shares.length || !bal.has(exp.payerId)) continue;
     const total = expenseBaseMinor(exp, base);
@@ -127,7 +127,78 @@ export function minTransfers(balances) {
   return { transfers, optimal: true };
 }
 
+// "낸 사람에게 직접 갚기" — 지출마다 생긴 빚을 사람 쌍별로 상계만 한다(제3자 경유 없음).
+export function directTransfers(trip, pays = []) {
+  const base = trip.baseCurrency;
+  const ids = new Set(trip.participants.map((p) => p.id));
+  const debt = new Map(); // "a>b" → a가 b에게 줄 돈
+  const add = (a, b, v) => { const k = `${a}>${b}`; debt.set(k, (debt.get(k) || 0) + v); };
+  for (const exp of trip.expenses) {
+    if (exp.deletedAt || exp.kind === 'transfer') continue;
+    const shares = (exp.shares || []).filter((s) => ids.has(s.pid) && s.w > 0);
+    if (!shares.length || !ids.has(exp.payerId)) continue;
+    const parts = splitMinor(expenseBaseMinor(exp, base), shares.map((s) => s.w));
+    shares.forEach((s, i) => { if (s.pid !== exp.payerId) add(s.pid, exp.payerId, parts[i]); });
+  }
+  for (const p of pays) add(p.to, p.from, p.amount); // 보낸 돈은 반대 방향 빚으로 상계
+  const order = trip.participants.map((p) => p.id);
+  const out = [];
+  for (let i = 0; i < order.length; i++) {
+    for (let j = i + 1; j < order.length; j++) {
+      const a = order[i], b = order[j];
+      const d = (debt.get(`${a}>${b}`) || 0) - (debt.get(`${b}>${a}`) || 0);
+      if (d > 0) out.push({ from: a, to: b, amount: d });
+      else if (d < 0) out.push({ from: b, to: a, amount: -d });
+    }
+  }
+  return out.sort((x, y) => y.amount - x.amount);
+}
+
+// "보냈어요"로 기록된 송금 (kind='transfer' 지출: 낸 사람=보낸 사람, 대상자=받은 사람)
+export function paymentsOf(trip) {
+  const ids = new Set(trip.participants.map((p) => p.id));
+  return trip.expenses
+    .filter((e) => !e.deletedAt && e.kind === 'transfer' && ids.has(e.payerId) && ids.has(e.shares?.[0]?.pid))
+    .map((e) => ({ id: e.id, from: e.payerId, to: e.shares[0].pid, amount: expenseBaseMinor(e, trip.baseCurrency) }));
+}
+
+// 정산 결과. transfers 각 항목에 done(보냈음)이 붙는다.
+// 보낸 송금이 모두 제안과 정확히 일치하면 제안 목록을 그대로 두고 체크만 한다 —
+// 한 건 보냈다고 나머지 제안이 뒤섞이면 사용자가 혼란스럽기 때문이다.
+// 일치하지 않는 송금(금액·상대가 다름)이 섞이면 남은 잔액으로 다시 계산한다.
 export function settle(trip) {
-  const balances = computeBalances(trip);
-  return { balances, ...minTransfers(balances) };
+  const mode = trip.settleMode === 'direct' ? 'direct' : 'min';
+  const bal0 = computeBalances(trip);
+  const pays = paymentsOf(trip);
+  const plan = mode === 'direct' ? { transfers: directTransfers(trip), optimal: true } : minTransfers(bal0);
+
+  const suggestions = plan.transfers.map((t) => ({ ...t, done: false }));
+  let allMatched = true;
+  for (const p of pays) {
+    const s = suggestions.find((x) => !x.done && x.from === p.from && x.to === p.to && x.amount === p.amount);
+    if (s) { s.done = true; s.paymentId = p.id; } else allMatched = false;
+  }
+
+  const sent = new Map(), recv = new Map();
+  for (const p of pays) {
+    sent.set(p.from, (sent.get(p.from) || 0) + p.amount);
+    recv.set(p.to, (recv.get(p.to) || 0) + p.amount);
+  }
+  const balances = bal0.map((b) => {
+    const s = sent.get(b.pid) || 0, r = recv.get(b.pid) || 0;
+    return { ...b, sent: s, received: r, net: b.net + s - r };
+  });
+
+  let transfers = suggestions;
+  let optimal = plan.optimal;
+  if (!allMatched) {
+    const pending = mode === 'direct' ? { transfers: directTransfers(trip, pays), optimal: true } : minTransfers(balances);
+    optimal = pending.optimal;
+    transfers = [
+      ...pending.transfers.map((t) => ({ ...t, done: false })),
+      ...pays.map((p) => ({ from: p.from, to: p.to, amount: p.amount, done: true, paymentId: p.id })),
+    ];
+  }
+  const totalSpent = bal0.reduce((a, b) => a + b.paid, 0);
+  return { mode, balances, transfers, optimal, totalSpent, pending: transfers.filter((t) => !t.done) };
 }

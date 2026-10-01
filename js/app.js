@@ -1,10 +1,10 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
-import { settle, expenseBaseMinor, decimalsOf } from './settle.js';
-import { createStore, me, recentTrips, deviceId } from './store.js';
-import { getRate, RATE_ATTRIBUTION } from './rates.js';
+import { settle, expenseBaseMinor, decimalsOf } from './settle.js?v=202610011402';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011402';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011402';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks,
-} from './share.js';
+} from './share.js?v=202610011402';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -34,6 +34,36 @@ async function copy(text, msg = '복사했어요') {
   }
 }
 
+// ───────── 연결 상태 막대 — 저장 실패를 조용히 넘기지 않는다 ─────────
+const net = { reason: null };
+function showNet(reason, msg, action) {
+  net.reason = reason;
+  const bar = document.getElementById('netbar');
+  bar.innerHTML = `<span>${esc(msg)}</span>${action ? `<button class="btn sm">${esc(action.label)}</button>` : ''}`;
+  if (action) bar.querySelector('button').onclick = action.run;
+  bar.hidden = false;
+}
+function hideNet(reason) {
+  if (reason && net.reason !== reason) return;
+  net.reason = null;
+  document.getElementById('netbar').hidden = true;
+}
+const isNetErr = (e) => !navigator.onLine || /fetch|network|load failed|timeout/i.test(e?.message || '');
+
+// 저장 실패 처리: 네트워크 문제면 막대로 크게 알리고(시트는 열린 채라 다시 누르면 됨), 그 외는 토스트
+function report(err) {
+  if (isNetErr(err)) showNet('save', '저장하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.');
+  else toast(err.message);
+}
+
+async function refreshTrip() {
+  if (!view.tripId) return;
+  try { view.trip = await store.getTrip(view.tripId); renderTrip(); hideNet('save'); } catch { /* 다음 기회에 */ }
+}
+
+addEventListener('offline', () => showNet('offline', '오프라인이에요. 연결되면 자동으로 다시 불러와요.'));
+addEventListener('online', () => { hideNet('offline'); refreshTrip(); });
+
 function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?.name ?? '?'; }
 const isAdmin = (trip) => !!me.adminKey(trip.id);
 
@@ -56,8 +86,14 @@ function renderHome() {
     <div class="hero">
       <div class="row between"><span class="badge">${store.mode === 'cloud' ? '실시간 공유' : '로컬 모드'}</span></div>
       <h1>여행 정산,<br>링크 하나로 끝.</h1>
-      <p>가입·설치 없이 같이 입력하고, 누가 누구에게 얼마 보낼지 <b>최소 이체</b>로 정리해 드려요.</p>
+      <p>같이 쓴 돈을 다 같이 적으면, 누가 누구에게 얼마 보낼지 <b>최소 송금</b>으로 정리해 드려요.</p>
+      <div class="trust"><span>✓ 가입 없음</span><span>✓ 앱 설치 없음</span><span>✓ 광고 없음</span></div>
     </div>
+    <ol class="steps">
+      <li><b>방 만들기</b><span>여행 이름과 멤버</span></li>
+      <li><b>링크 보내기</b><span>카톡 단톡방에</span></li>
+      <li><b>쓴 돈 적기</b><span>정산표는 자동</span></li>
+    </ol>
     <form class="card stack" id="create">
       <label class="field"><span>여행 이름</span>
         <input class="input" name="name" maxlength="60" placeholder="예: 10월 오사카 3박4일" required></label>
@@ -84,8 +120,10 @@ function renderHome() {
     try {
       const t = await store.createTrip({ name: String(f.get('name')).trim(), baseCurrency: f.get('base'), names });
       me.set(t.id, t.participants[0].id);
+      store.claimParticipant(t.id, t.participants[0].id).catch(() => {});
+      sessionStorage.setItem(`fresh:${t.id}`, '1'); // 방금 만든 방 → 초대 카드를 크게
       location.hash = `#/t/${t.id}`;
-    } catch (err) { toast(err.message); e.target.querySelector('button').disabled = false; }
+    } catch (err) { report(err); e.target.querySelector('button').disabled = false; }
   };
 }
 
@@ -112,8 +150,17 @@ async function openTrip(id, tab) {
     $app.innerHTML = `<div class="empty">${esc(e.message)}<br><br><a href="#/">처음으로</a></div>`;
     return;
   }
-  view.unsub = store.subscribe(id, async () => {
-    try { view.trip = await store.getTrip(id); renderTrip(); } catch { /* 일시 오류 무시 */ }
+  let wasDown = false;
+  view.unsub = store.subscribe(id, refreshTrip, (status) => {
+    if (status === 'SUBSCRIBED') {
+      hideNet('realtime');
+      if (wasDown) refreshTrip(); // 끊긴 사이 바뀐 내용 따라잡기
+      wasDown = false;
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      wasDown = true;
+      showNet('realtime', '실시간 연결이 끊겼어요. 다른 사람이 적은 내용이 늦게 보일 수 있어요.',
+        { label: '새로고침', run: () => location.reload() });
+    }
   });
   if (!sessionStorage.getItem(`opened:${id}`)) {
     sessionStorage.setItem(`opened:${id}`, '1');
@@ -138,13 +185,13 @@ function renderTrip() {
         <a class="icon-btn" href="#/" aria-label="처음으로">←</a>
         <h1 class="grow">${esc(t.name)}</h1>
         ${t.settledAt ? '<span class="badge">정산 완료</span>' : ''}
-        <button class="btn sm primary" id="share">초대</button>
+        <button class="btn sm primary" id="share">친구 초대</button>
       </div>
       <nav class="tabs" role="tablist">${tabs.map(([k, l]) =>
         `<button role="tab" aria-selected="${view.tab === k}" data-tab="${k}">${l}</button>`).join('')}</nav>
     </header>
     <div class="summary">
-      <div class="card"><span class="muted small">총 지출</span><b class="num">${fmt(result.balances.reduce((a, b) => a + b.paid, 0), t.baseCurrency)}</b></div>
+      <div class="card"><span class="muted small">총 지출</span><b class="num">${fmt(result.totalSpent, t.baseCurrency)}</b></div>
       <div class="card"><span class="muted small">${!mine ? '나' : `${esc(nameOf(t, myId))}님 ${mine.net > 0 ? '받을 돈' : mine.net < 0 ? '낼 돈' : ''}`}</span>
         <b class="num ${mine?.net > 0 ? 'plus' : mine?.net < 0 ? 'minus' : ''}">${!mine ? '—'
           : mine.net ? fmt(Math.abs(mine.net), t.baseCurrency) : '정산 0원'}</b></div>
@@ -168,23 +215,31 @@ function renderTrip() {
 function renderList(body, t) {
   const q = view.q.trim().toLowerCase();
   const live = t.expenses.filter((e) => !e.deletedAt);
+  const spends = live.filter((e) => e.kind !== 'transfer');
   const list = live
     .filter((e) => !q || e.title.toLowerCase().includes(q) || nameOf(t, e.payerId).toLowerCase().includes(q))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
 
   const byCur = {};
-  live.forEach((e) => { byCur[e.currency] = (byCur[e.currency] || 0) + Number(e.amount); });
+  spends.forEach((e) => { byCur[e.currency] = (byCur[e.currency] || 0) + Number(e.amount); });
   const curLine = Object.keys(byCur).length > 1
     ? `<p class="muted small">통화별 합계: ${Object.entries(byCur).map(([c, v]) => fmtMajor(v, c)).join(' · ')}</p>` : '';
 
   let lastDay = '';
   body.innerHTML = `
+    ${inviteCard(t, spends.length)}
     ${live.length > 4 ? `<input class="input" id="q" type="search" placeholder="검색 (내용·낸 사람)" value="${esc(view.q)}">` : ''}
     ${curLine}
-    ${!live.length ? `<div class="empty">아직 지출이 없어요.<br>아래 <b>＋ 지출</b>로 첫 항목을 넣어 보세요.</div>` : ''}
+    ${!spends.length ? `<div class="empty">아직 지출이 없어요.<br>아래 <b>＋ 지출</b>로 첫 항목을 넣어 보세요.</div>` : ''}
     ${list.map((e) => {
       const day = e.date !== lastDay ? `<div class="day">${esc(e.date)}</div>` : '';
       lastDay = e.date;
+      if (e.kind === 'transfer') {
+        return `${day}<div class="exp transfer" data-tid="${esc(e.id)}">
+          <div class="grow"><div class="t">💸 ${esc(nameOf(t, e.payerId))} → ${esc(nameOf(t, e.shares[0]?.pid))} 송금</div>
+            <div class="muted small">보냈어요 표시 · 눌러서 취소</div></div>
+          <div class="amt num muted">${fmtMajor(e.amount, e.currency)}</div></div>`;
+      }
       let baseLine = '';
       if (e.currency !== t.baseCurrency) {
         try { baseLine = `<div class="muted small num">≈ ${fmt(expenseBaseMinor(e, t.baseCurrency), t.baseCurrency)}</div>`; } catch { baseLine = '<div class="minus small">환율 필요</div>'; }
@@ -206,42 +261,128 @@ function renderList(body, t) {
   body.querySelectorAll('[data-eid]').forEach((el) => {
     el.onclick = () => expenseSheet(t.expenses.find((e) => e.id === el.dataset.eid));
   });
+  body.querySelectorAll('[data-tid]').forEach((el) => {
+    el.onclick = () => undoTransfer(t, el.dataset.tid);
+  });
+  bindInviteCard(body, t);
+}
+
+// 초대 카드: 방을 막 만들었거나, 아직 안 들어온 멤버가 있고 지출이 적을 때 맨 위에
+function inviteCard(t, spendCount) {
+  const cloud = store.mode === 'cloud';
+  const waiting = cloud ? t.participants.filter((p) => !p.joinedAt) : [];
+  const fresh = sessionStorage.getItem(`fresh:${t.id}`) && spendCount < 3;
+  if (!fresh && !(waiting.length && spendCount < 5) && spendCount > 0) return '';
+  return `<div class="card invite">
+    <b>👋 친구를 초대하세요</b>
+    <p class="small">링크를 단톡방에 올리면, 친구는 가입 없이 이름만 고르고 바로 같이 적을 수 있어요.</p>
+    <div class="row"><button class="btn primary grow" id="inv-share">카톡으로 초대하기</button>
+      <button class="btn ghost" id="inv-copy">링크 복사</button></div>
+    ${cloud ? `<div class="joined small">${t.participants.map((p) => p.joinedAt
+      ? `<span class="on">✓ ${esc(p.name)}</span>` : `<span>${esc(p.name)} 대기</span>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+function bindInviteCard(body, t) {
+  const s = body.querySelector('#inv-share');
+  if (!s) return;
+  s.onclick = () => shareTrip(t);
+  body.querySelector('#inv-copy').onclick = async () => {
+    copy(await tripLink(t), '링크를 복사했어요. 단톡방에 붙여 넣으세요');
+    store.logEvent(t.id, 'invite_shared', { via: 'copy' });
+  };
+}
+
+async function undoTransfer(t, tid) {
+  const e = t.expenses.find((x) => x.id === tid);
+  if (!e || !confirm(`${nameOf(t, e.payerId)} → ${nameOf(t, e.shares[0]?.pid)} 송금 기록을 취소할까요?`)) return;
+  try { await store.deleteExpense(t.id, tid); await refreshTrip(); toast('송금 기록을 취소했어요'); }
+  catch (err) { report(err); }
 }
 
 function renderSettle(body, t, result) {
   const cur = t.baseCurrency;
+  const { pending } = result;
+  const done = result.transfers.filter((x) => x.done);
+  const allDone = result.transfers.length > 0 && !pending.length;
+  const modeNote = result.mode === 'direct'
+    ? '지출마다 <b>낸 사람에게 바로</b> 갚아요. 송금 횟수는 늘 수 있어요.'
+    : `각자 낼 총액은 같고 <b>송금 횟수만 줄였어요</b>. 그래서 같이 안 먹은 사람에게 보낼 수도 있어요.${result.optimal ? '' : ' (인원이 많아 간소화 계산)'}`;
+
+  const row = (x) => {
+    const i = result.transfers.indexOf(x);
+    const links = x.done ? [] : transferLinks(t.participants.find((p) => p.id === x.to), x.amount, cur);
+    return `<div class="xfer ${x.done ? 'done' : ''}">
+      <span class="who">${esc(nameOf(t, x.from))}</span><span class="muted">→</span><span class="who">${esc(nameOf(t, x.to))}</span>
+      <span class="amt num">${fmt(x.amount, cur)}</span>
+      <div class="links">
+        ${x.done
+          ? `<span class="paid">✓ 보냈어요</span><button class="btn sm ghost" data-undo="${i}">취소</button>`
+          : `<button class="btn sm send" data-paid="${i}">보냈어요 ✓</button>
+             <button class="btn sm ghost" data-copy-amt="${i}">금액 복사</button>
+             ${links.map((l, j) => l.href
+               ? `<a class="btn sm ghost" href="${esc(l.href)}" target="_blank" rel="noopener" data-paylink="${l.kind}">${l.label}${l.over ? ' (한도 30만)' : ''}</a>`
+               : `<button class="btn sm ghost" data-copy-acc="${i}:${j}">${l.label}</button>`).join('')}`}
+      </div>
+      ${!x.done && !links.length ? `<p class="muted small hint">${esc(nameOf(t, x.to))}님이 멤버 탭에 송금 정보를 넣으면 송금 버튼이 생겨요</p>` : ''}
+    </div>`;
+  };
+
   body.innerHTML = `
+    <div class="seg" role="radiogroup" aria-label="정산 방식">
+      <button role="radio" aria-checked="${result.mode === 'min'}" data-mode="min">최소 송금</button>
+      <button role="radio" aria-checked="${result.mode === 'direct'}" data-mode="direct">낸 사람에게 직접</button>
+    </div>
+    <p class="muted small mode-note">${modeNote}</p>
+    ${allDone ? `<div class="card celebrate"><b>🎉 정산 끝!</b><p class="small">모든 송금이 완료됐어요.</p></div>` : ''}
     <div class="card">
-      <div class="row between"><b>보낼 돈 ${result.transfers.length}건</b>
-        <span class="muted small">${result.optimal ? '최소 이체' : '간소화 이체'}</span></div>
-      ${!result.transfers.length ? '<div class="empty">보낼 돈이 없어요 🎉</div>' : ''}
-      ${result.transfers.map((x, i) => {
-        const links = transferLinks(t.participants.find((p) => p.id === x.to), x.amount, cur);
-        return `<div class="xfer">
-          <span class="who">${esc(nameOf(t, x.from))}</span><span class="muted">→</span><span class="who">${esc(nameOf(t, x.to))}</span>
-          <span class="amt num">${fmt(x.amount, cur)}</span>
-          <div class="links">
-            <button class="btn sm ghost" data-copy-amt="${i}">금액 복사</button>
-            ${links.map((l, j) => l.href
-              ? `<a class="btn sm ghost" href="${esc(l.href)}" target="_blank" rel="noopener" data-paylink="${l.kind}">${l.label}${l.over ? ' (한도 30만)' : ''}</a>`
-              : `<button class="btn sm ghost" data-copy-acc="${i}:${j}">${l.label}</button>`).join('')}
-            ${!links.length ? `<span class="muted small">${esc(nameOf(t, x.to))}님이 멤버 탭에 송금 정보를 넣으면 버튼이 생겨요</span>` : ''}
-          </div></div>`;
-      }).join('')}
+      <div class="row between"><b>${pending.length ? `보낼 돈 ${pending.length}건` : '보낼 돈 없음'}</b>
+        ${done.length ? `<span class="muted small">완료 ${done.length}건</span>` : ''}</div>
+      ${!result.transfers.length ? '<div class="empty">아직 정산할 게 없어요</div>' : ''}
+      ${pending.map(row).join('')}
+      ${done.map(row).join('')}
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn primary grow" id="share-text">카톡용 복사</button>
       <button class="btn grow" id="share-img">이미지로 공유</button>
     </div>
     <details class="card" style="margin-top:12px"><summary>계산 근거 보기</summary>
-      <table class="basis num"><thead><tr><th>이름</th><th>낸 돈</th><th>쓴 몫</th><th>차액</th></tr></thead><tbody>
+      <table class="basis num"><thead><tr><th>이름</th><th>낸 돈</th><th>쓴 몫</th><th>송금</th><th>남은 차액</th></tr></thead><tbody>
       ${result.balances.map((b) => `<tr><td>${esc(nameOf(t, b.pid))}</td><td>${fmt(b.paid, cur)}</td><td>${fmt(b.owed, cur)}</td>
+        <td>${[b.sent && `보냄 ${fmt(b.sent, cur)}`, b.received && `받음 ${fmt(b.received, cur)}`].filter(Boolean).join(' / ') || '—'}</td>
         <td class="${b.net > 0 ? 'plus' : b.net < 0 ? 'minus' : ''}">${b.net > 0 ? '+' : ''}${fmt(b.net, cur)}</td></tr>`).join('')}
       </tbody></table>
-      <p class="muted small">외화 지출은 입력한 환율(또는 카드 청구액)로 ${cur} 환산. 나누어 떨어지지 않는 1${cur === 'KRW' ? '원' : ' 단위'}은 목록 앞사람이 냅니다.</p>
+      <p class="muted small">남은 차액이 +면 받을 돈, −면 낼 돈. 외화 지출은 입력한 환율(또는 카드 청구액)로 ${cur} 환산. 나누어 떨어지지 않는 1${cur === 'KRW' ? '원' : ' 단위'}은 목록 앞사람이 냅니다.</p>
     </details>
     ${isAdmin(t) ? `<button class="btn ghost block" id="mark" style="margin-top:12px">${t.settledAt ? '정산 완료 취소' : '정산 완료로 표시'}</button>` : ''}`;
 
+  body.querySelectorAll('[data-mode]').forEach((b) => {
+    b.onclick = async () => {
+      if (b.dataset.mode === result.mode) return;
+      try { await store.setSettleMode(t.id, b.dataset.mode); await refreshTrip(); }
+      catch (err) { report(err); }
+    };
+  });
+  body.querySelectorAll('[data-paid]').forEach((b) => {
+    b.onclick = async () => {
+      const x = result.transfers[+b.dataset.paid];
+      b.disabled = true;
+      try {
+        await store.addExpense(t.id, {
+          kind: 'transfer', title: `송금 ${nameOf(t, x.from)}→${nameOf(t, x.to)}`, date: today(),
+          amount: x.amount / 10 ** decimalsOf(cur), currency: cur, rate: null, baseOverride: null,
+          payerId: x.from, shares: [{ pid: x.to, w: 1 }],
+        });
+        view.trip = await store.getTrip(t.id);
+        if (!settle(view.trip).pending.length) store.logEvent(t.id, 'all_paid');
+        renderTrip();
+        toast(`${nameOf(t, x.from)} → ${nameOf(t, x.to)} 송금 완료로 표시했어요`);
+      } catch (err) { b.disabled = false; report(err); }
+    };
+  });
+  body.querySelectorAll('[data-undo]').forEach((b) => {
+    b.onclick = () => undoTransfer(t, result.transfers[+b.dataset.undo].paymentId);
+  });
   body.querySelectorAll('[data-copy-amt]').forEach((b) => {
     b.onclick = () => copy(String(result.transfers[+b.dataset.copyAmt].amount / 10 ** decimalsOf(cur)), '금액을 복사했어요');
   });
@@ -270,8 +411,8 @@ function renderSettle(body, t, result) {
   };
   const mark = body.querySelector('#mark');
   if (mark) mark.onclick = async () => {
-    try { await store.markSettled(t.id, !t.settledAt); view.trip = await store.getTrip(t.id); renderTrip(); }
-    catch (e) { toast(e.message); }
+    try { await store.markSettled(t.id, !t.settledAt); await refreshTrip(); }
+    catch (e) { report(e); }
   };
 }
 
@@ -300,7 +441,7 @@ function renderPeople(body, t) {
     if (!n) return;
     if (t.participants.some((p) => p.name === n)) return toast('같은 이름이 이미 있어요');
     try { await store.addParticipant(t.id, n); view.trip = await store.getTrip(t.id); renderTrip(); }
-    catch (err) { toast(err.message); }
+    catch (err) { report(err); }
   };
   body.querySelector('#whoami').onclick = () => pickIdentity();
 }
@@ -328,6 +469,7 @@ function pickIdentity() {
       const first = !me.get(t.id);
       me.set(t.id, pid);
       if (first) store.logEvent(t.id, 'joined', { creator: isAdmin(t) });
+      store.claimParticipant(t.id, pid).catch(() => {});
       closeSheet();
       renderTrip();
     };
@@ -339,7 +481,7 @@ function pickIdentity() {
       const exist = t.participants.find((p) => p.name === n);
       if (exist) return done(exist.id);
       try { const p = await store.addParticipant(t.id, n); view.trip = await store.getTrip(t.id); done(p.id); }
-      catch (err) { toast(err.message); }
+      catch (err) { report(err); }
     };
   });
 }
@@ -363,7 +505,7 @@ function payInfoSheet(p) {
       const payInfo = Object.fromEntries(['toss', 'kakao', 'account'].map((k) => [k, String(f.get(k)).trim()]).filter(([, v]) => v));
       if (payInfo.kakao && !/^https:\/\/qr\.kakaopay\.com\//.test(payInfo.kakao)) return toast('카카오페이 링크는 https://qr.kakaopay.com/ 으로 시작해요');
       try { await store.updateParticipant(view.trip.id, p.id, { payInfo }); view.trip = await store.getTrip(view.trip.id); closeSheet(); renderTrip(); }
-      catch (err) { toast(err.message); }
+      catch (err) { report(err); }
     };
   });
 }
@@ -450,7 +592,7 @@ function expenseSheet(exp) {
     if (del) del.onclick = async () => {
       if (!confirm('이 지출을 지울까요?')) return;
       try { await store.deleteExpense(t.id, exp.id); view.trip = await store.getTrip(t.id); closeSheet(); renderTrip(); toast('지웠어요'); }
-      catch (err) { toast(err.message); }
+      catch (err) { report(err); }
     };
     updateFx(); updatePer();
 
@@ -476,7 +618,7 @@ function expenseSheet(exp) {
         view.trip = await store.getTrip(t.id);
         closeSheet(); renderTrip();
         toast(editing ? '저장했어요' : '추가했어요');
-      } catch (err) { toast(err.message); }
+      } catch (err) { report(err); }
     };
   });
 }
@@ -486,19 +628,27 @@ function lastCurrency(t) {
 }
 
 // ───────── 초대(공유) ─────────
+async function tripLink(t) {
+  const page = location.href.split('#')[0];
+  return store.mode === 'cloud' ? `${page.replace(/\?local=1$/, '')}#/t/${t.id}` : `${page}#/s/${await encodeSnapshot(t)}`;
+}
+
 async function shareTrip(t) {
-  const base = location.href.split('#')[0];
-  const url = store.mode === 'cloud' ? `${base}#/t/${t.id}` : `${base}#/s/${await encodeSnapshot(t)}`;
-  const text = `✈️ ${t.name} 정산방이에요. 쓴 돈 여기에 같이 적어요 (가입 없음)`;
+  const url = await tripLink(t);
+  const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (가입·설치 없음)`;
+  store.logEvent(t.id, 'invite_shared', { via: navigator.share ? 'share' : 'copy' });
+  sessionStorage.removeItem(`fresh:${t.id}`);
   if (navigator.share) {
     try { await navigator.share({ title: t.name, text, url }); return; } catch { /* 취소 → 복사 */ }
   }
-  copy(`${text}\n${url}`, store.mode === 'cloud' ? '초대 링크를 복사했어요' : '현재 상태 링크를 복사했어요');
+  copy(`${text}\n${url}`, store.mode === 'cloud' ? '초대 링크를 복사했어요. 단톡방에 붙여 넣으세요' : '현재 상태 링크를 복사했어요');
 }
 
 // ───────── 시작 ─────────
 (async () => {
-  store = await createStore(window.ENBBANG_CONFIG);
+  // ?local=1 — 테스트·시연용. 실서버 지표를 오염시키지 않도록 로컬 모드로 강제
+  const forceLocal = new URLSearchParams(location.search).has('local');
+  store = await createStore(forceLocal ? null : window.ENBBANG_CONFIG);
   window.__enbbang = { store }; // 디버깅용
   addEventListener('hashchange', route);
   route();

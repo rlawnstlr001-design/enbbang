@@ -1,6 +1,6 @@
 // 공유 — 로컬 모드 스냅샷 링크 / 카톡 붙여넣기용 텍스트 / 세로 이미지 카드 / 송금 링크
 
-import { fromMinor } from './settle.js';
+import { fromMinor } from './settle.js?v=202610011402';
 
 // ───── 스냅샷 (로컬 모드 전용: 링크 안에 방 전체를 압축해 담는다) ─────
 const b64url = {
@@ -48,14 +48,18 @@ export function fmtMajor(major, cur) {
 export function settlementText(trip, result, nameOf) {
   const cur = trip.baseCurrency;
   const lines = [`💸 ${trip.name} 정산`, ''];
-  if (!result.transfers.length) lines.push('보낼 돈이 없어요. 모두 정산 끝!');
-  for (const t of result.transfers) {
+  if (!result.pending.length) lines.push('보낼 돈이 없어요. 모두 정산 끝! 🎉');
+  for (const t of result.pending) {
     lines.push(`${nameOf(t.from)} → ${nameOf(t.to)}  ${fmt(t.amount, cur)}`);
     const info = payLine(trip.participants.find((p) => p.id === t.to));
     if (info) lines.push(`   ${info}`);
   }
-  const total = result.balances.reduce((a, b) => a + b.paid, 0);
-  lines.push('', `총 지출 ${fmt(total, cur)} · 이체 ${result.transfers.length}번`, '엔빵으로 계산했어요');
+  const done = result.transfers.filter((t) => t.done);
+  if (done.length) {
+    lines.push('', '✓ 보낸 것');
+    for (const t of done) lines.push(`${nameOf(t.from)} → ${nameOf(t.to)}  ${fmt(t.amount, cur)}`);
+  }
+  lines.push('', `총 지출 ${fmt(result.totalSpent, cur)} · 남은 송금 ${result.pending.length}번`, '엔빵으로 계산했어요');
   return lines.join('\n');
 }
 
@@ -100,8 +104,9 @@ export async function settlementImage(trip, result, nameOf) {
   g.fillStyle = '#FF7A1A'; g.fillRect(0, 0, W, 12);
   g.fillStyle = '#1F1A14'; g.font = font(800, 44); g.fillText(trip.name, pad, 100);
   g.fillStyle = '#7A6A58'; g.font = font(500, 26);
-  const total = result.balances.reduce((a, b) => a + b.paid, 0);
-  g.fillText(`총 지출 ${fmt(total, cur)} · 이체 ${result.transfers.length}번이면 끝`, pad, 148);
+  g.fillText(result.pending.length
+    ? `총 지출 ${fmt(result.totalSpent, cur)} · 송금 ${result.pending.length}번이면 끝`
+    : `총 지출 ${fmt(result.totalSpent, cur)} · 정산 완료`, pad, 148);
 
   let y = 220;
   if (!result.transfers.length) {
@@ -110,9 +115,9 @@ export async function settlementImage(trip, result, nameOf) {
   for (const t of result.transfers) {
     g.fillStyle = '#FFFFFF';
     roundRect(g, pad - 8, y - 46, W - 2 * pad + 16, rowH - 14, 18); g.fill();
-    g.fillStyle = '#1F1A14'; g.font = font(700, 30);
-    g.fillText(`${nameOf(t.from)}  →  ${nameOf(t.to)}`, pad + 12, y);
-    g.font = font(800, 32); g.fillStyle = '#E2560B';
+    g.fillStyle = t.done ? '#A8977F' : '#1F1A14'; g.font = font(700, 30);
+    g.fillText(`${t.done ? '✓ ' : ''}${nameOf(t.from)}  →  ${nameOf(t.to)}`, pad + 12, y);
+    g.font = font(800, 32); g.fillStyle = t.done ? '#A8977F' : '#E2560B';
     const s = fmt(t.amount, cur);
     g.fillText(s, W - pad - 12 - g.measureText(s).width, y);
     y += rowH;
