@@ -1,10 +1,10 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
-import { settle, expenseBaseMinor, decimalsOf } from './settle.js?v=202610011402';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011402';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011402';
+import { settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor } from './settle.js?v=202610011545';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011545';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011545';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks,
-} from './share.js?v=202610011402';
+} from './share.js?v=202610011545';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -244,7 +244,8 @@ function renderList(body, t) {
       if (e.currency !== t.baseCurrency) {
         try { baseLine = `<div class="muted small num">≈ ${fmt(expenseBaseMinor(e, t.baseCurrency), t.baseCurrency)}</div>`; } catch { baseLine = '<div class="minus small">환율 필요</div>'; }
       }
-      const who = e.shares.length === t.participants.length ? '전원' : `${e.shares.length}명`;
+      const mode = splitModeOf(e.shares);
+      const who = `${e.shares.length === t.participants.length ? '전원' : `${e.shares.length}명`}${mode === 'parts' ? ' · 몫대로' : mode === 'exact' ? ' · 금액 지정' : ''}`;
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
         <div class="grow"><div class="t">${esc(e.title)}</div>
           <div class="muted small">${esc(nameOf(t, e.payerId))} 결제 · ${who}</div></div>
@@ -510,6 +511,20 @@ function payInfoSheet(p) {
   });
 }
 
+// 받침 있으면 '이', 없으면 '가' (한글이 아니면 '이(가)')
+function iGa(name) {
+  const c = String(name).charCodeAt(String(name).length - 1);
+  if (c >= 0xAC00 && c <= 0xD7A3) return (c - 0xAC00) % 28 ? '이' : '가';
+  return '이(가)';
+}
+
+// 저장된 shares에서 나누기 방식을 되살린다: a(금액)가 있으면 금액 지정, 몫이 1이 아니면 몫, 아니면 똑같이
+function splitModeOf(shares) {
+  if (shares.some((s) => s.a != null)) return 'exact';
+  if (shares.some((s) => s.w !== 1)) return 'parts';
+  return 'equal';
+}
+
 function expenseSheet(exp) {
   const t = view.trip;
   const myId = me.get(t.id);
@@ -519,28 +534,47 @@ function expenseSheet(exp) {
     title: '', date: today(), amount: '', currency: lastCurrency(t), rate: '', baseOverride: '',
     payerId: myId || t.participants[0].id, shares: t.participants.map((p) => ({ pid: p.id, w: 1 })),
   };
-  const sel = new Set(e.shares.map((s) => s.pid));
+  const people = t.participants;
+  const st = {
+    payerId: e.payerId,
+    mode: splitModeOf(e.shares),
+    sel: new Set(e.shares.filter((s) => s.w > 0).map((s) => s.pid)),
+    parts: new Map(people.map((p) => [p.id, e.shares.find((s) => s.pid === p.id)?.w ?? 0])),
+    exact: new Map(people.map((p) => [p.id, String(e.shares.find((s) => s.pid === p.id)?.a ?? '')])),
+    open: null,
+  };
+  if (st.mode !== 'parts') people.forEach((p) => st.parts.set(p.id, st.sel.has(p.id) ? 1 : 0));
 
   openSheet(`
     <h2>${editing ? '지출 수정' : '지출 추가'}</h2>
     <form class="stack" id="ef">
-      <label class="field"><span>내용</span><input class="input" name="title" maxlength="100" value="${esc(e.title)}" placeholder="예: 저녁 이자카야" required></label>
-      <div class="row">
-        <label class="field grow"><span>금액</span><input class="input num" name="amount" inputmode="decimal" value="${esc(e.amount)}" placeholder="0" required></label>
-        <label class="field" style="width:110px"><span>통화</span><select class="input" name="currency">${CURRENCIES.map((c) => `<option ${c === e.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <div class="amount-row">
+        <input class="input amount num" name="amount" inputmode="decimal" autocomplete="off" value="${esc(e.amount)}" placeholder="0" aria-label="금액" required>
+        <select class="input cur" name="currency" aria-label="통화">${CURRENCIES.map((c) => `<option ${c === e.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>
       </div>
-      <div id="fx" class="card stack ${e.currency === t.baseCurrency ? 'hidden' : ''}" style="background:var(--surface-2)">
-        <label class="field"><span id="rate-label">환율</span><input class="input num" name="rate" inputmode="decimal" value="${esc(e.rate)}"></label>
-        <label class="field"><span>실제 카드 청구액 (${t.baseCurrency}, 선택 — 넣으면 환율보다 우선)</span><input class="input num" name="baseOverride" inputmode="decimal" value="${esc(e.baseOverride ?? '')}"></label>
+      <input class="input" name="title" maxlength="100" value="${esc(e.title)}" placeholder="어디에 썼나요? 예: 저녁 이자카야" aria-label="내용" required>
+      <div id="fx" class="fx ${e.currency === t.baseCurrency ? 'hidden' : ''}">
+        <label class="fx-row"><span id="rate-label">환율</span>
+          <input class="input num fx-rate" name="rate" inputmode="decimal" value="${esc(e.rate)}"><span class="muted">${t.baseCurrency}</span></label>
+        <details ${e.baseOverride != null && e.baseOverride !== '' ? 'open' : ''}><summary class="small">실제 카드 청구액으로 맞추기</summary>
+          <label class="fx-row"><span>청구액</span><input class="input num" name="baseOverride" inputmode="decimal" value="${esc(e.baseOverride ?? '')}" placeholder="넣으면 환율보다 우선"><span class="muted">${t.baseCurrency}</span></label>
+        </details>
         <p class="muted small" id="fx-note"></p>
       </div>
-      <div class="row">
-        <label class="field grow"><span>낸 사람</span><select class="input" name="payerId">${t.participants.map((p) => `<option value="${esc(p.id)}" ${p.id === e.payerId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
-        <label class="field" style="width:150px"><span>날짜</span><input class="input" type="date" name="date" value="${esc(e.date)}"></label>
+      <p class="summary-line" id="summary"></p>
+      <div id="payer-pick" class="card panel hidden">
+        <span class="muted small">누가 냈나요?</span>
+        <div class="chips">${people.map((p) => `<button type="button" class="chip" data-payer="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
       </div>
-      <div class="field"><span class="muted small" style="font-weight:600">누구 몫? <button type="button" class="btn sm ghost" id="all">전원</button></span>
-        <div class="chips" id="shares" style="margin-top:6px">${t.participants.map((p) => `<button type="button" class="chip" data-pid="${esc(p.id)}" aria-pressed="${sel.has(p.id)}">${esc(p.name)}</button>`).join('')}</div>
-        <p class="muted small" id="per"></p></div>
+      <div id="split" class="card panel hidden">
+        <div class="seg small-seg" role="radiogroup" aria-label="나누는 방식">
+          <button type="button" role="radio" data-split="equal">똑같이</button>
+          <button type="button" role="radio" data-split="parts">몫대로</button>
+          <button type="button" role="radio" data-split="exact">금액 직접</button>
+        </div>
+        <div id="split-body"></div>
+      </div>
+      <label class="field date-row"><span>날짜</span><input class="input" type="date" name="date" value="${esc(e.date)}"></label>
       ${canEdit ? '' : '<p class="minus small">이 지출은 입력한 사람이나 총무만 고칠 수 있어요.</p>'}
       <div class="row">
         ${editing && canEdit ? '<button type="button" class="btn ghost" id="del">삭제</button>' : ''}
@@ -550,42 +584,141 @@ function expenseSheet(exp) {
     </form>`, (el) => {
     const f = el.querySelector('#ef');
     const fx = el.querySelector('#fx');
-    const per = el.querySelector('#per');
+    const cur = () => f.currency.value;
+    const totalMinor = () => { const a = parseAmount(f.amount.value); return a > 0 ? toMinor(a, cur()) : 0; };
 
-    const updatePer = () => {
-      const amt = parseAmount(f.amount.value);
-      per.textContent = sel.size && amt > 0 ? `1인당 약 ${fmtMajor(amt / sel.size, f.currency.value)}` : sel.size ? '' : '한 명 이상 골라 주세요';
+    // 현재 선택으로 사람별 몫(통화 최소 단위)을 계산 — 미리보기와 검증에 같이 쓴다
+    const allocation = () => {
+      const total = totalMinor();
+      if (st.mode === 'exact') {
+        return people.map((p) => {
+          const v = parseAmount(st.exact.get(p.id) || 0);
+          return { pid: p.id, minor: v > 0 ? toMinor(v, cur()) : 0 };
+        });
+      }
+      const ws = people.map((p) => (st.mode === 'parts' ? st.parts.get(p.id) : st.sel.has(p.id) ? 1 : 0));
+      if (!total || !ws.some((w) => w > 0)) return people.map((p) => ({ pid: p.id, minor: 0 }));
+      const parts = splitMinor(total, ws.map((w) => w || 0));
+      return people.map((p, i) => ({ pid: p.id, minor: ws[i] > 0 ? parts[i] : 0 }));
     };
+
+    const renderSummary = () => {
+      const payer = nameOf(t, st.payerId);
+      let who;
+      if (st.mode === 'exact') who = '금액을 정해서';
+      else if (st.mode === 'parts') who = '몫대로';
+      else who = st.sel.size === people.length ? '전원 똑같이' : `${st.sel.size}명 똑같이`;
+      let tail = '';
+      const total = totalMinor();
+      if (st.mode === 'equal' && st.sel.size && total) tail = ` · 1인당 약 ${fmt(Math.round(total / st.sel.size), cur())}`;
+      if (st.mode === 'exact' && total) {
+        const left = total - allocation().reduce((a, x) => a + x.minor, 0);
+        tail = left ? ` · <span class="minus">${left > 0 ? '남은' : '초과'} ${fmt(Math.abs(left), cur())}</span>` : ' · 딱 맞아요 ✓';
+      }
+      el.querySelector('#summary').innerHTML = `
+        <button type="button" class="link-btn" data-open="payer-pick">${esc(payer)}</button>${iGa(payer)} 내고
+        <button type="button" class="link-btn" data-open="split">${who}</button> 나눠요${tail}`;
+      el.querySelectorAll('[data-open]').forEach((b) => {
+        b.onclick = () => togglePanel(b.dataset.open);
+      });
+    };
+
+    const togglePanel = (id) => {
+      st.open = st.open === id ? null : id;
+      ['payer-pick', 'split'].forEach((p) => el.querySelector(`#${p}`).classList.toggle('hidden', st.open !== p));
+    };
+
+    const renderSplit = () => {
+      el.querySelectorAll('[data-split]').forEach((b) => b.setAttribute('aria-checked', b.dataset.split === st.mode));
+      const body = el.querySelector('#split-body');
+      const alloc = new Map(allocation().map((x) => [x.pid, x.minor]));
+      const amt = (pid) => (totalMinor() && alloc.get(pid) ? fmt(alloc.get(pid), cur()) : '');
+      if (st.mode === 'equal') {
+        body.innerHTML = `
+          <div class="chips">${people.map((p) => `<button type="button" class="chip" data-sel="${esc(p.id)}" aria-pressed="${st.sel.has(p.id)}">${esc(p.name)}</button>`).join('')}</div>
+          <div class="row between small muted"><span>${st.sel.size ? '빠질 사람은 눌러서 끄세요' : '한 명 이상 골라 주세요'}</span>
+            <button type="button" class="btn sm ghost" id="sel-all">전원</button></div>`;
+        body.querySelectorAll('[data-sel]').forEach((b) => {
+          b.onclick = () => {
+            st.sel.has(b.dataset.sel) ? st.sel.delete(b.dataset.sel) : st.sel.add(b.dataset.sel);
+            refresh();
+          };
+        });
+        body.querySelector('#sel-all').onclick = () => { people.forEach((p) => st.sel.add(p.id)); refresh(); };
+      } else if (st.mode === 'parts') {
+        body.innerHTML = `<p class="muted small">커플은 2, 술 안 마신 사람은 0처럼 몫을 정하세요.</p>
+          ${people.map((p) => `<div class="part-row">
+            <span class="grow">${esc(p.name)}</span>
+            <button type="button" class="step" data-dec="${esc(p.id)}" aria-label="${esc(p.name)} 몫 줄이기">−</button>
+            <b class="num part-n">${st.parts.get(p.id)}</b>
+            <button type="button" class="step" data-inc="${esc(p.id)}" aria-label="${esc(p.name)} 몫 늘리기">＋</button>
+            <span class="num muted part-amt">${amt(p.id)}</span></div>`).join('')}`;
+        body.querySelectorAll('[data-dec]').forEach((b) => {
+          b.onclick = () => { st.parts.set(b.dataset.dec, Math.max(0, st.parts.get(b.dataset.dec) - 1)); refresh(); };
+        });
+        body.querySelectorAll('[data-inc]').forEach((b) => {
+          b.onclick = () => { st.parts.set(b.dataset.inc, Math.min(9, st.parts.get(b.dataset.inc) + 1)); refresh(); };
+        });
+      } else {
+        body.innerHTML = `<p class="muted small">각자 쓴 금액(${cur()})을 적으세요. 합계가 총액과 같아야 해요.</p>
+          ${people.map((p) => `<label class="part-row"><span class="grow">${esc(p.name)}</span>
+            <input class="input num exact-in" inputmode="decimal" data-exact="${esc(p.id)}" value="${esc(st.exact.get(p.id))}" placeholder="0"></label>`).join('')}`;
+        body.querySelectorAll('[data-exact]').forEach((i) => {
+          i.oninput = () => { st.exact.set(i.dataset.exact, i.value); renderSummary(); };
+        });
+      }
+    };
+
+    const refresh = () => { renderSummary(); renderSplit(); };
+
+    el.querySelectorAll('[data-split]').forEach((b) => {
+      b.onclick = () => {
+        const next = b.dataset.split;
+        if (next === st.mode) return;
+        // 방식을 바꿀 때 지금 고른 사람을 이어받는다
+        const active = st.mode === 'parts' ? new Set(people.filter((p) => st.parts.get(p.id) > 0).map((p) => p.id)) : st.sel;
+        if (next === 'parts') people.forEach((p) => st.parts.set(p.id, active.has(p.id) ? Math.max(1, st.parts.get(p.id)) : 0));
+        if (next === 'equal') st.sel = new Set(active);
+        st.mode = next;
+        refresh();
+      };
+    });
+    el.querySelectorAll('[data-payer]').forEach((b) => {
+      b.setAttribute('aria-pressed', b.dataset.payer === st.payerId);
+      b.onclick = () => {
+        st.payerId = b.dataset.payer;
+        el.querySelectorAll('[data-payer]').forEach((x) => x.setAttribute('aria-pressed', x.dataset.payer === st.payerId));
+        togglePanel('payer-pick');
+        renderSummary();
+      };
+    });
+
     const updateFx = async () => {
-      const cur = f.currency.value;
-      fx.classList.toggle('hidden', cur === t.baseCurrency);
-      el.querySelector('#rate-label').textContent = `환율 (1 ${cur} = ? ${t.baseCurrency})`;
-      if (cur === t.baseCurrency) return;
+      fx.classList.toggle('hidden', cur() === t.baseCurrency);
+      el.querySelector('#rate-label').textContent = `1 ${cur()} =`;
+      if (cur() === t.baseCurrency) return;
       const note = el.querySelector('#fx-note');
-      if (!f.rate.value || f.dataset.autoRateFor !== cur) {
+      if (!f.rate.value || f.dataset.autoRateFor !== cur()) {
         note.textContent = '환율 불러오는 중…';
-        const r = await getRate(cur, t.baseCurrency);
+        const r = await getRate(cur(), t.baseCurrency);
         if (r) {
           if (!editing || f.dataset.autoRateFor) f.rate.value = r.rate;
-          f.dataset.autoRateFor = cur;
-          note.innerHTML = `오늘 기준 참고 환율(${esc(r.date)}). 실제 카드 환율과 다를 수 있어요. <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${RATE_ATTRIBUTION.text}</a>`;
+          f.dataset.autoRateFor = cur();
+          note.innerHTML = `${esc(r.date)} 참고 환율이에요. 카드 청구액과 다를 수 있어요 · <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${RATE_ATTRIBUTION.text}</a>`;
         } else note.textContent = '환율을 못 불러왔어요. 직접 입력해 주세요.';
       }
     };
     if (editing) f.dataset.autoRateFor = e.currency;
-    f.currency.onchange = () => { f.dataset.autoRateFor = ''; f.rate.value = ''; updateFx(); updatePer(); };
-    f.amount.oninput = updatePer;
-    el.querySelectorAll('#shares [data-pid]').forEach((b) => {
-      b.onclick = () => {
-        sel.has(b.dataset.pid) ? sel.delete(b.dataset.pid) : sel.add(b.dataset.pid);
-        b.setAttribute('aria-pressed', sel.has(b.dataset.pid));
-        updatePer();
-      };
-    });
-    el.querySelector('#all').onclick = () => {
-      t.participants.forEach((p) => sel.add(p.id));
-      el.querySelectorAll('#shares [data-pid]').forEach((b) => b.setAttribute('aria-pressed', 'true'));
-      updatePer();
+    f.currency.onchange = () => { f.dataset.autoRateFor = ''; f.rate.value = ''; updateFx(); refresh(); };
+    // 천 단위 쉼표 — 끝에서 타이핑할 때만 다시 써서 커서가 튀지 않게
+    const withCommas = (v) => {
+      const [i, d] = String(v).replace(/[^\d.]/g, '').split('.');
+      return (i || '').replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d !== undefined ? '.' + d.slice(0, 2) : '');
+    };
+    if (f.amount.value) f.amount.value = withCommas(f.amount.value);
+    f.amount.oninput = () => {
+      if (f.amount.selectionStart === f.amount.value.length) f.amount.value = withCommas(f.amount.value);
+      refresh();
     };
     el.querySelector('#cancel').onclick = closeSheet;
     const del = el.querySelector('#del');
@@ -594,27 +727,39 @@ function expenseSheet(exp) {
       try { await store.deleteExpense(t.id, exp.id); view.trip = await store.getTrip(t.id); closeSheet(); renderTrip(); toast('지웠어요'); }
       catch (err) { report(err); }
     };
-    updateFx(); updatePer();
+    updateFx(); refresh();
+    if (!editing) setTimeout(() => f.amount.focus(), 50); // 금액부터 바로 입력
 
     f.onsubmit = async (ev) => {
       ev.preventDefault();
       const amount = parseAmount(f.amount.value);
-      if (!(amount > 0)) return toast('금액을 확인해 주세요');
-      if (!sel.size) return toast('누구 몫인지 한 명 이상 골라 주세요');
-      const cur = f.currency.value;
+      if (!(amount > 0)) { f.amount.focus(); return toast('금액을 확인해 주세요'); }
+      let shares;
+      // 참여자 목록 순서 유지 — 1원 배분 순서가 기기마다 같아야 한다
+      if (st.mode === 'equal') {
+        if (!st.sel.size) { togglePanel('split'); return toast('누구 몫인지 한 명 이상 골라 주세요'); }
+        shares = people.filter((p) => st.sel.has(p.id)).map((p) => ({ pid: p.id, w: 1 }));
+      } else if (st.mode === 'parts') {
+        shares = people.filter((p) => st.parts.get(p.id) > 0).map((p) => ({ pid: p.id, w: st.parts.get(p.id) }));
+        if (!shares.length) { if (st.open !== 'split') togglePanel('split'); return toast('몫을 한 명 이상 정해 주세요'); }
+      } else {
+        const alloc = allocation();
+        const sum = alloc.reduce((a, x) => a + x.minor, 0);
+        if (sum !== totalMinor()) { if (st.open !== 'split') togglePanel('split'); return toast('사람별 금액의 합계가 총액과 달라요'); }
+        shares = alloc.filter((x) => x.minor > 0).map((x) => ({ pid: x.pid, w: x.minor, a: fromMinor(x.minor, cur()) }));
+      }
+      const c = cur();
       const data = {
-        title: f.title.value.trim(), date: f.date.value || today(), amount, currency: cur,
-        rate: cur === t.baseCurrency ? null : parseAmount(f.rate.value) || null,
-        baseOverride: cur === t.baseCurrency || !f.baseOverride.value.trim() ? null : parseAmount(f.baseOverride.value),
-        payerId: f.payerId.value,
-        // 참여자 목록 순서 유지 — 1원 배분 순서가 기기마다 같아야 한다
-        shares: t.participants.filter((p) => sel.has(p.id)).map((p) => ({ pid: p.id, w: 1 })),
+        title: f.title.value.trim(), date: f.date.value || today(), amount, currency: c,
+        rate: c === t.baseCurrency ? null : parseAmount(f.rate.value) || null,
+        baseOverride: c === t.baseCurrency || !f.baseOverride.value.trim() ? null : parseAmount(f.baseOverride.value),
+        payerId: st.payerId, shares,
       };
-      if (cur !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
+      if (c !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
       try {
         if (editing) await store.updateExpense(t.id, exp.id, data);
         else await store.addExpense(t.id, data);
-        try { localStorage.setItem(`enbbang:lastcur:${t.id}`, cur); } catch { /* 무시 */ }
+        try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
         view.trip = await store.getTrip(t.id);
         closeSheet(); renderTrip();
         toast(editing ? '저장했어요' : '추가했어요');

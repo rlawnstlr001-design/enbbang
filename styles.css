@@ -147,3 +147,30 @@ details summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
   padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top)); background: var(--minus); color: #fff; font-size: 14px; font-weight: 600; text-align: center; }
 #netbar[hidden] { display: none; }
 #netbar .btn { background: #fff; color: var(--minus); }
+
+/* ── P1-1 지출 입력 (2026-10-01) ── */
+.amount-row { display: flex; gap: 8px; align-items: stretch; }
+.input.amount { flex: 1; min-width: 0; font-size: 30px; font-weight: 800; padding: 10px 14px; letter-spacing: -.5px; }
+.input.cur { width: 96px; font-weight: 700; }
+.summary-line { margin: 0; line-height: 2.1; font-size: 16px; }
+.link-btn { border: 0; background: var(--accent-soft); color: var(--accent-ink); font-weight: 800; padding: 6px 10px; min-height: 36px;
+  border-radius: 10px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.panel { padding: 12px; }
+.panel > * + * { margin-top: 10px; }
+.small-seg button { min-height: 40px; font-size: 14px; }
+.part-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.part-row:last-child { border-bottom: 0; }
+.step { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font-size: 20px; font-weight: 800; cursor: pointer; }
+.part-n { width: 24px; text-align: center; font-size: 18px; }
+.part-amt { width: 88px; text-align: right; font-size: 13px; }
+.exact-in { width: 130px; text-align: right; }
+label.field.date-row { display: flex; align-items: center; gap: 10px; }
+.date-row > span { margin: 0 !important; }
+.date-row .input { width: auto; flex: 1; }
+.fx { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.fx-row { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+.fx-row .input { flex: 1; min-width: 0; padding: 8px 10px; }
+.fx details { margin-top: 6px; }
+.fx details summary { color: var(--accent-ink); font-weight: 700; padding: 6px 0; }
+.fx p { margin: 6px 0 0; }
+.link-btn { padding: 4px 6px; margin: 0 1px; }
