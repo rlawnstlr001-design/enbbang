@@ -201,3 +201,8 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
 .member-chip button { border: 0; background: transparent; font-size: 18px; line-height: 1; width: 28px; height: 28px; cursor: pointer; color: var(--muted); }
 .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 900; font-size: 18px; letter-spacing: -.3px; }
 .brand i { font-style: normal; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 16px; }
+
+/* ── 앱(Capacitor) — 노치·상태바 영역 ── */
+.is-app .top { padding-top: calc(14px + env(safe-area-inset-top)); }
+.is-app .hero { padding-top: calc(24px + env(safe-area-inset-top)); }
+.is-app #netbar { padding-top: calc(10px + env(safe-area-inset-top)); }

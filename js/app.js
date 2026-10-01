@@ -1,12 +1,13 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610011719';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011719';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011719';
+} from './settle.js?v=202610020837';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610020837';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610020837';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610011719';
+} from './share.js?v=202610020837';
+import { isApp, SITE, nativeShare, nativeShareImage, haptic, scheduleReminder, initNative } from './native.js?v=202610020837';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -373,6 +374,7 @@ function renderSettle(body, t, result) {
           ? `<span class="paid">✓ 보냈어요</span><button class="btn sm ghost" data-undo="${i}">취소</button>`
           : `<button class="btn sm send" data-paid="${i}">보냈어요 ✓</button>
              <button class="btn sm ghost" data-remind="${i}">🔔 리마인드</button>
+             ${isApp && x.from === me.get(t.id) ? `<button class="btn sm ghost" data-alarm="${i}">⏰ 내일 알림</button>` : ''}
              <button class="btn sm ghost" data-copy-amt="${i}">금액 복사</button>
              ${links.map((l, j) => l.href
                ? `<a class="btn sm ghost" href="${esc(l.href)}" target="_blank" rel="noopener" data-paylink="${l.kind}">${l.label}${l.over ? ' (한도 30만)' : ''}</a>`
@@ -432,6 +434,7 @@ function renderSettle(body, t, result) {
         view.trip = await store.getTrip(t.id);
         if (!settle(view.trip).pending.length) store.logEvent(t.id, 'all_paid');
         renderTrip();
+        haptic('success');
         toast(`${nameOf(t, x.from)} → ${nameOf(t, x.to)} 송금 완료로 표시했어요`);
       } catch (err) { b.disabled = false; report(err); }
     };
@@ -448,6 +451,24 @@ function renderSettle(body, t, result) {
     b.onclick = () => remind([x], `${nameOf(t, x.from)}님에게 보낼 알림을 복사했어요. 카톡에 붙여 넣으세요`);
   });
   body.querySelector('#remind-all')?.addEventListener('click', () => remind(pending, '안 보낸 사람 모두에게 보낼 알림을 복사했어요'));
+  // 앱 전용: 내가 보낼 돈이 있으면 내일 오전 10시에 휴대폰 알림
+  body.querySelectorAll('[data-alarm]').forEach((b) => {
+    const x = result.transfers[+b.dataset.alarm];
+    b.onclick = async () => {
+      const at = new Date();
+      at.setDate(at.getDate() + 1);
+      at.setHours(10, 0, 0, 0);
+      const r = await scheduleReminder({
+        key: `${t.id}:${x.from}:${x.to}`,
+        title: `${t.name} 정산`,
+        body: `${nameOf(t, x.to)}님께 ${fmt(x.amount, cur)} 보낼 차례예요`,
+        at,
+        hash: `#/t/${t.id}/settle`,
+      });
+      if (r === 'scheduled') { haptic(); toast('내일 오전 10시에 알려 드릴게요'); }
+      else if (r === 'denied') toast('알림 권한이 꺼져 있어요. 휴대폰 설정에서 켜 주세요');
+    };
+  });
   body.querySelectorAll('[data-copy-amt]').forEach((b) => {
     b.onclick = () => copy(String(result.transfers[+b.dataset.copyAmt].amount / 10 ** decimalsOf(cur)), '금액을 복사했어요');
   });
@@ -467,6 +488,7 @@ function renderSettle(body, t, result) {
     const blob = await settlementImage(t, result, (pid) => nameOf(t, pid));
     const file = new File([blob], `${t.name}-정산.png`, { type: 'image/png' });
     store.logEvent(t.id, 'settle_shared', { via: 'image' });
+    if (await nativeShareImage(blob, `${t.id}-settle.png`, `${t.name} 정산`)) return;
     if (navigator.canShare?.({ files: [file] })) {
       try { await navigator.share({ files: [file], title: `${t.name} 정산` }); return; } catch { /* 취소 → 다운로드로 */ }
     }
@@ -893,6 +915,7 @@ function expenseSheet(exp) {
         try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
         view.trip = await store.getTrip(t.id);
         closeSheet(); renderTrip();
+        haptic('success');
         toast(editing ? '저장했어요' : '추가했어요');
       } catch (err) { report(err); }
     };
@@ -906,7 +929,9 @@ function lastCurrency(t) {
 // ───────── 초대(공유) ─────────
 async function tripLink(t) {
   const page = location.href.split('#')[0];
-  return store.mode === 'cloud' ? `${page.replace(/\?local=1$/, '')}#/t/${t.id}` : `${page}#/s/${await encodeSnapshot(t)}`;
+  // 앱 안 주소(localhost)가 아니라 실제 도메인으로 공유
+  const base = isApp ? SITE : page.replace(/\?local=1$/, '');
+  return store.mode === 'cloud' ? `${base}#/t/${t.id}` : `${page}#/s/${await encodeSnapshot(t)}`;
 }
 
 async function shareTrip(t) {
@@ -914,6 +939,7 @@ async function shareTrip(t) {
   const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵)`;
   store.logEvent(t.id, 'invite_shared', { via: navigator.share ? 'share' : 'copy' });
   sessionStorage.removeItem(`fresh:${t.id}`);
+  if (await nativeShare({ title: t.name, text, url })) return;
   if (navigator.share) {
     try { await navigator.share({ title: t.name, text, url }); return; } catch { /* 취소 → 복사 */ }
   }
@@ -927,5 +953,14 @@ async function shareTrip(t) {
   store = await createStore(forceLocal ? null : window.ENBBANG_CONFIG);
   window.__enbbang = { store }; // 디버깅용
   addEventListener('hashchange', route);
+  initNative({
+    onOpenHash: (h) => { if (location.hash !== h) location.hash = h; else route(); },
+    // 안드로이드 뒤로가기: 시트 닫기 → 이전 화면 → (홈이면) 앱 종료
+    onBack: () => {
+      if ($sheet.innerHTML) { closeSheet(); return true; }
+      if (location.hash && location.hash !== '#/') { history.back(); return true; }
+      return false;
+    },
+  });
   route();
 })();
