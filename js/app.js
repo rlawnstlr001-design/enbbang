@@ -1,12 +1,12 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610011611';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011611';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011611';
+} from './settle.js?v=202610011651';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011651';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011651';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610011611';
+} from './share.js?v=202610011651';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -97,7 +97,8 @@ function renderHome() {
   const recent = recentTrips();
   $app.innerHTML = `
     <div class="hero">
-      <div class="row between"><span class="badge">${store.mode === 'cloud' ? '실시간 공유' : '로컬 모드'}</span></div>
+      <div class="row between"><span class="brand"><i>N</i>트립N빵</span>
+        <span class="badge">${store.mode === 'cloud' ? '베타' : '로컬 모드'}</span></div>
       <h1>여행 정산,<br>링크 하나로 끝.</h1>
       <p>같이 쓴 돈을 다 같이 적으면, 누가 누구에게 얼마 보낼지 <b>최소 송금</b>으로 정리해 드려요.</p>
       <div class="trust"><span>✓ 가입 없음</span><span>✓ 앱 설치 없음</span><span>✓ 광고 없음</span></div>
@@ -911,7 +912,7 @@ async function tripLink(t) {
 
 async function shareTrip(t) {
   const url = await tripLink(t);
-  const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (가입·설치 없음)`;
+  const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵 · 가입·설치 없음)`;
   store.logEvent(t.id, 'invite_shared', { via: navigator.share ? 'share' : 'copy' });
   sessionStorage.removeItem(`fresh:${t.id}`);
   if (navigator.share) {

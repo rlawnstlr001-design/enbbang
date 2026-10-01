@@ -1,6 +1,6 @@
 // 공유 — 로컬 모드 스냅샷 링크 / 카톡 붙여넣기용 텍스트 / 세로 이미지 카드 / 송금 링크
 
-import { fromMinor } from './settle.js?v=202610011611';
+import { fromMinor } from './settle.js?v=202610011651';
 
 // ───── 스냅샷 (로컬 모드 전용: 링크 안에 방 전체를 압축해 담는다) ─────
 const b64url = {
@@ -59,7 +59,7 @@ export function settlementText(trip, result, nameOf) {
     lines.push('', '✓ 보낸 것');
     for (const t of done) lines.push(`${nameOf(t.from)} → ${nameOf(t.to)}  ${fmt(t.amount, cur)}`);
   }
-  lines.push('', `총 지출 ${fmt(result.totalSpent, cur)} · 남은 송금 ${result.pending.length}번`, '엔빵으로 계산했어요');
+  lines.push('', `총 지출 ${fmt(result.totalSpent, cur)} · 남은 송금 ${result.pending.length}번`, '트립N빵으로 계산했어요');
   return lines.join('\n');
 }
 
@@ -138,7 +138,7 @@ export async function settlementImage(trip, result, nameOf) {
     y += rowH;
   }
   g.fillStyle = '#A8977F'; g.font = font(500, 22);
-  g.fillText('엔빵 — 링크 하나로 여행 정산', pad, H - 48);
+  g.fillText('트립N빵 — 링크 하나로 여행 정산', pad, H - 48);
   return new Promise((res) => c.toBlob(res, 'image/png'));
 }
 
