@@ -1,12 +1,12 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610011705';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011705';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011705';
+} from './settle.js?v=202610011719';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610011719';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610011719';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610011705';
+} from './share.js?v=202610011719';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -101,7 +101,6 @@ function renderHome() {
         <span class="badge">${store.mode === 'cloud' ? '베타' : '로컬 모드'}</span></div>
       <h1>여행 정산,<br>링크 하나로 끝.</h1>
       <p>같이 쓴 돈을 다 같이 적으면, 누가 누구에게 얼마 보낼지 <b>최소 송금</b>으로 정리해 드려요.</p>
-      <div class="trust"><span>✓ 가입 없음</span><span>✓ 앱 설치 없음</span><span>✓ 광고 없음</span></div>
     </div>
     <ol class="steps">
       <li><b>방 만들기</b><span>여행 이름과 멤버</span></li>
@@ -325,7 +324,7 @@ function inviteCard(t, spendCount) {
   if (!fresh && !(waiting.length && spendCount < 5) && spendCount > 0) return '';
   return `<div class="card invite">
     <b>👋 친구를 초대하세요</b>
-    <p class="small">링크를 단톡방에 올리면, 친구는 가입 없이 이름만 고르고 바로 같이 적을 수 있어요.</p>
+    <p class="small">링크를 단톡방에 올리면, 친구는 이름만 고르면 바로 같이 적을 수 있어요.</p>
     <div class="row"><button class="btn primary grow" id="inv-share">카톡으로 초대하기</button>
       <button class="btn ghost" id="inv-copy">링크 복사</button></div>
     ${cloud ? `<div class="joined small">${t.participants.map((p) => p.joinedAt
@@ -912,7 +911,7 @@ async function tripLink(t) {
 
 async function shareTrip(t) {
   const url = await tripLink(t);
-  const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵 · 가입·설치 없음)`;
+  const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵)`;
   store.logEvent(t.id, 'invite_shared', { via: navigator.share ? 'share' : 'copy' });
   sessionStorage.removeItem(`fresh:${t.id}`);
   if (navigator.share) {
