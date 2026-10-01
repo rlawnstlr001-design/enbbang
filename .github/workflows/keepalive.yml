@@ -1,0 +1,31 @@
+# Supabase 무료 플랜은 7일간 요청이 없으면 프로젝트를 일시정지한다.
+# 매일 한 번 읽기 전용 RPC를 불러 깨워 둔다 (데이터를 쓰지 않아 베타 지표에 영향 없음).
+name: supabase-keepalive
+
+on:
+  schedule:
+    - cron: '17 3 * * *'   # 매일 12:17 KST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: https://nkmkqczahmwqjddzpeqr.supabase.co
+          SUPABASE_KEY: sb_publishable_EkAloSEEewcCT4qyu6smSQ_gk4kDT_R  # 공개용 키 (config.js와 동일)
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/rpc/enb_get_trip" \
+              -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' -d '{"p_trip":"keepalive"}')
+            echo "attempt $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 30
+          done
+          echo "::error::Supabase 응답 없음 — 대시보드에서 프로젝트가 일시정지됐는지 확인"
+          exit 1
