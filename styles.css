@@ -73,7 +73,7 @@ a.btn { display: inline-block; text-decoration: none; color: inherit; }
 
 /* 폼 */
 label.field { display: block; }
-label.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+label.field > span, div.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
 .input { width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 12px; outline: none; }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
