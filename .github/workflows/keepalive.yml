@@ -45,3 +45,18 @@ jobs:
           curl -s -X DELETE "$SUPABASE_URL/storage/v1/object/receipts" \
             -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' \
             -d "{\"prefixes\": $names}" | jq 'length' | xargs echo "deleted:"
+
+      # 안부한장(같은 Supabase 프로젝트) — 주인 없는 사진 정리
+      - name: Clean orphan haru photos
+        env:
+          SUPABASE_URL: https://nkmkqczahmwqjddzpeqr.supabase.co
+          SUPABASE_KEY: sb_publishable_EkAloSEEewcCT4qyu6smSQ_gk4kDT_R
+        run: |
+          names=$(curl -s -X POST "$SUPABASE_URL/rest/v1/rpc/hb_orphan_photos" \
+            -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' -d '{}')
+          count=$(echo "$names" | jq 'length')
+          echo "orphans: $count"
+          [ "$count" = "0" ] && exit 0
+          curl -s -X DELETE "$SUPABASE_URL/storage/v1/object/haru-photos" \
+            -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' \
+            -d "{\"prefixes\": $names}" | jq 'length' | xargs echo "deleted:"
