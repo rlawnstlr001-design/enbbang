@@ -38,6 +38,48 @@ function rememberTrip(trip) {
 }
 export function recentTrips() { return LS.get('enbbang:recent', []); }
 
+// ───────────────────────── 오프라인 (비행기·해외 데이터 끊김) ─────────────────────────
+// ① 마지막으로 불러온 여행방을 기기에 저장해 두고(enbbang:cache:<id>) 연결이 없으면 그걸 보여 준다
+// ② 연결이 없을 때 넣은 지출·수정은 대기열(enbbang:outbox)에 쌓았다가 연결되면 순서대로 보낸다
+//    대기 중인 지출은 임시 id(tmp_…)를 쓰고, 서버에는 cid로 보내 같은 지출이 두 번 들어가지 않게 한다
+export const isNetError = (e) => !navigator.onLine || /fetch|network|load failed|timeout/i.test(e?.message || String(e || ''));
+const OUTBOX = 'enbbang:outbox';
+const outbox = {
+  all: () => LS.get(OUTBOX, []),
+  save(list) {
+    LS.set(OUTBOX, list);
+    dispatchEvent(new CustomEvent('enbbang:outbox'));
+  },
+  push(op) { outbox.save([...outbox.all(), { key: uid(8), at: new Date().toISOString(), ...op }]); },
+};
+export const pendingCount = (tripId) => outbox.all().filter((o) => o.tripId === tripId && !(o.type === 'add' && o.exp.deletedAt)).length;
+
+// 서버에서 받은 여행방 + 아직 못 보낸 변경 = 화면에 보일 여행방
+function withOutbox(t) {
+  const ops = outbox.all().filter((o) => o.tripId === t.id);
+  if (!ops.length) return t;
+  const exps = t.expenses.map((e) => ({ ...e }));
+  for (const o of ops) {
+    if (o.type === 'add') exps.push({ ...o.exp, id: o.cid, device: o.device, createdAt: o.at, deletedAt: o.exp.deletedAt || null, pending: true });
+    else {
+      const e = exps.find((x) => x.id === o.eid);
+      if (e) Object.assign(e, o.args.p_patch, { pending: true });
+    }
+  }
+  return { ...t, expenses: exps };
+}
+function cacheTrip(t) {
+  LS.set(`enbbang:cache:${t.id}`, t);
+  // 최근 목록(20개)에 없는 방의 저장본은 지운다 — 기기 저장 공간 보호
+  const keep = new Set(recentTrips().map((x) => x.id));
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith('enbbang:cache:') && !keep.has(k.slice(14))) localStorage.removeItem(k);
+    }
+  } catch { /* 무시 */ }
+}
+
 // ───────────────────────── LocalStore ─────────────────────────
 export class LocalStore {
   mode = 'local';
@@ -166,10 +208,19 @@ export class CloudStore {
     return t;
   }
   async getTrip(id) {
-    const t = await this.#rpc('enb_get_trip', { p_trip: id });
+    let t;
+    try {
+      await this.flush();
+      t = await this.#rpc('enb_get_trip', { p_trip: id });
+    } catch (e) {
+      const cached = isNetError(e) && LS.get(`enbbang:cache:${id}`);
+      if (!cached) throw e;
+      return withOutbox({ ...cached, offline: true });
+    }
     if (!t) throw new Error('여행방을 찾을 수 없어요');
     rememberTrip(t);
-    return t;
+    cacheTrip(t);
+    return withOutbox(t);
   }
   async addParticipant(id, name) {
     const p = await this.#rpc('enb_add_participant', { p_trip: id, p_name: name });
@@ -181,15 +232,72 @@ export class CloudStore {
     this.#ping(id);
   }
   async addExpense(id, exp) {
-    const e = await this.#rpc('enb_add_expense', { p_trip: id, p_exp: exp, p_device: deviceId() });
-    this.#ping(id);
-    return e;
+    // cid: 응답만 끊겨 서버엔 이미 들어간 경우 다시 보내도 한 건만 남게 하는 표시
+    const cid = `tmp_${uid(10)}`;
+    const body = { ...exp, cid };
+    // 앞서 못 보낸 게 있으면 순서를 지키려고 이것도 대기열 뒤에 붙인다
+    if (!outbox.all().length) {
+      try {
+        const e = await this.#rpc('enb_add_expense', { p_trip: id, p_exp: body, p_device: deviceId() });
+        this.#ping(id);
+        return e;
+      } catch (err) { if (!isNetError(err)) throw err; }
+    }
+    outbox.push({ type: 'add', tripId: id, cid, exp: body, device: deviceId() });
+    this.flush();
+    return { id: cid, pending: true };
   }
   async updateExpense(id, eid, patch) {
-    await this.#rpc('enb_update_expense', {
-      p_trip: id, p_eid: eid, p_patch: patch, p_device: deviceId(), p_admin: me.adminKey(id) || '',
-    });
-    this.#ping(id);
+    eid = this.#idMap.get(eid) || eid;
+    if (eid.startsWith('tmp_')) { // 아직 서버에 없는 지출 → 대기 중인 추가 자체를 고친다 (지우기·되살리기 포함)
+      const list = outbox.all();
+      const op = list.find((o) => o.type === 'add' && o.cid === eid);
+      if (op) { Object.assign(op.exp, patch); outbox.save(list); return; }
+    }
+    const args = { p_trip: id, p_eid: eid, p_patch: patch, p_device: deviceId(), p_admin: me.adminKey(id) || '' };
+    if (!outbox.all().length) {
+      try {
+        await this.#rpc('enb_update_expense', args);
+        this.#ping(id);
+        return;
+      } catch (err) { if (!isNetError(err)) throw err; }
+    }
+    outbox.push({ type: 'update', tripId: id, eid, args });
+    this.flush();
+  }
+  // 대기열 보내기 — 연결이 없으면 바로 멈추고, 서버가 거절한 건(방 삭제 등)은 버린다
+  #idMap = new Map(); // 임시 id → 서버 id (보낸 뒤 화면이 새로 고쳐지기 전에 수정하는 경우)
+  #flushing = null;
+  flush() {
+    // 이미 보내는 중이면 그게 끝난 뒤 한 번 더 (그 사이 연결이 돌아왔을 수 있다)
+    if (this.#flushing) return this.#flushing.then(() => this.flush());
+    this.#flushing = (async () => {
+      let done = 0, failed = 0;
+      const touched = new Set();
+      for (let op; (op = outbox.all()[0]);) {
+        try {
+          if (op.type === 'add') {
+            if (!op.exp.deletedAt) {
+              const r = await this.#rpc('enb_add_expense', { p_trip: op.tripId, p_exp: op.exp, p_device: op.device });
+              if (r?.id) this.#idMap.set(op.cid, r.id);
+              done++;
+            }
+          } else {
+            await this.#rpc('enb_update_expense', { ...op.args, p_eid: this.#idMap.get(op.eid) || op.eid });
+            done++;
+          }
+        } catch (e) {
+          if (isNetError(e)) break;
+          failed++;
+        }
+        outbox.save(outbox.all().filter((o) => o.key !== op.key));
+        touched.add(op.tripId);
+      }
+      touched.forEach((id) => this.#ping(id));
+      if (done || failed) dispatchEvent(new CustomEvent('enbbang:flushed', { detail: { done, failed } }));
+      return { done, failed };
+    })().finally(() => { this.#flushing = null; });
+    return this.#flushing;
   }
   async deleteExpense(id, eid) { return this.updateExpense(id, eid, { deletedAt: new Date().toISOString() }); }
   async markSettled(id, on = true) {
@@ -236,7 +344,9 @@ export class CloudStore {
 export async function createStore(config) {
   if (config?.supabaseUrl && config?.supabaseAnonKey) {
     try {
-      const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+      // 앱은 js/supabase.js(빌드 때 내장)가 window.supabase를 만든다 → 비행기 모드로 켜도 서버 클라이언트가 생긴다
+      const { createClient } = window.supabase?.createClient ? window.supabase
+        : await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
       return new CloudStore(createClient(config.supabaseUrl, config.supabaseAnonKey));
     } catch (e) {
       console.warn('Supabase 연결 실패 — 로컬 모드로 동작', e);

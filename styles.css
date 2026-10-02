@@ -233,3 +233,6 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
   align-items: center; justify-content: center; gap: 12px; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top)); }
 .photo-viewer img { max-width: 100%; max-height: 85vh; object-fit: contain; border-radius: 8px; }
 .photo-viewer span { color: #ccc; }
+
+/* 오프라인으로 넣어 아직 서버에 못 간 지출 */
+.badge.pending { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }

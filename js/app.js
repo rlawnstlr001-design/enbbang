@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610021514';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610021514';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610021514';
+} from './settle.js?v=202610021523';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610021523';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610021523';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610021514';
+} from './share.js?v=202610021523';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610021514';
+} from './native.js?v=202610021523';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -78,8 +78,23 @@ async function refreshTrip() {
   try { view.trip = await store.getTrip(view.tripId); renderTrip(); hideNet('save'); } catch { /* 다음 기회에 */ }
 }
 
-addEventListener('offline', () => showNet('offline', '오프라인이에요. 연결되면 자동으로 다시 불러와요.'));
-addEventListener('online', () => { hideNet('offline'); refreshTrip(); });
+// 오프라인: 지출은 그대로 넣으면 기기에 쌓였다가 연결되면 저장된다 (store.js 대기열)
+function updateOfflineBar() {
+  const n = view.tripId && store?.mode === 'cloud' ? pendingCount(view.tripId) : 0;
+  if (n) showNet('offline', `오프라인 · 지출 ${n}건은 연결되면 자동으로 저장돼요`);
+  else if (!navigator.onLine || view.trip?.offline) showNet('offline', '오프라인이에요. 지출은 그대로 넣으면 연결될 때 저장돼요.');
+  else hideNet('offline');
+}
+addEventListener('offline', updateOfflineBar);
+addEventListener('online', () => { updateOfflineBar(); store?.flush?.(); refreshTrip(); });
+addEventListener('enbbang:outbox', updateOfflineBar);
+addEventListener('enbbang:flushed', (e) => {
+  const { done, failed } = e.detail;
+  if (failed) toast(`지출 ${failed}건은 저장하지 못했어요. 다시 넣어 주세요`);
+  else if (done) toast(`연결돼서 지출 ${done}건을 저장했어요`);
+  refreshTrip();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) store?.flush?.(); });
 
 function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?.name ?? '?'; }
 const isAdmin = (trip) => !!me.adminKey(trip.id);
@@ -262,6 +277,7 @@ function renderTrip() {
   if (view.tab === 'settle') renderSettle(body, t, result);
   else if (view.tab === 'people') renderPeople(body, t);
   else renderList(body, t);
+  updateOfflineBar();
 }
 
 function renderList(body, t) {
@@ -288,7 +304,7 @@ function renderList(body, t) {
       lastDay = e.date;
       if (e.kind === 'transfer') {
         return `${day}<div class="exp transfer" data-tid="${esc(e.id)}">
-          <div class="grow"><div class="t">💸 ${esc(nameOf(t, e.payerId))} → ${esc(nameOf(t, e.shares[0]?.pid))} 송금</div>
+          <div class="grow"><div class="t">💸 ${esc(nameOf(t, e.payerId))} → ${esc(nameOf(t, e.shares[0]?.pid))} 송금${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}</div>
             <div class="muted small">보냈어요 표시 · 눌러서 취소</div></div>
           <div class="amt num muted">${fmtMajor(e.amount, e.currency)}</div></div>`;
       }
@@ -301,7 +317,7 @@ function renderList(body, t) {
       const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES.find((c) => c.id === 'etc');
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
         <span class="cat-ico" aria-label="${cat.label}">${cat.emoji}</span>
-        <div class="grow"><div class="t">${esc(e.title)}${e.receipt ? ' <span class="rc-mark" aria-label="영수증 있음">🧾</span>' : ''}</div>
+        <div class="grow"><div class="t">${esc(e.title)}${e.receipt ? ' <span class="rc-mark" aria-label="영수증 있음">🧾</span>' : ''}${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}</div>
           <div class="muted small">${esc(nameOf(t, e.payerId))} 결제 · ${who}</div></div>
         <div class="amt num">${fmtMajor(e.amount, e.currency)}${baseLine}</div></div>`;
     }).join('')}`;
@@ -946,21 +962,29 @@ function expenseSheet(exp) {
       };
       if (c !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
       const submitBtn = f.querySelector('.btn.primary');
+      let photoSkipped = false;
       try {
         if (st.photo) {
           submitBtn.disabled = true;
           submitBtn.textContent = '사진 올리는 중…';
-          data.receipt = await store.uploadReceipt(t.id, st.photo);
+          try { data.receipt = await store.uploadReceipt(t.id, st.photo); }
+          catch (err) {
+            if (!isNetErr(err)) throw err;
+            data.receipt = st.receipt; // 사진은 연결이 필요해서 이번엔 빼고 지출만 저장
+            photoSkipped = true;
+          }
         } else {
           data.receipt = st.receipt; // 그대로 두거나, ×로 뺐으면 null
         }
-        if (editing) await store.updateExpense(t.id, exp.id, data);
-        else await store.addExpense(t.id, data);
+        const saved = editing ? await store.updateExpense(t.id, exp.id, data) : await store.addExpense(t.id, data);
         try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
         view.trip = await store.getTrip(t.id);
         closeSheet(); renderTrip();
         feedback('add');
-        toast(editing ? '저장했어요' : '추가했어요');
+        const done = editing ? '저장했어요' : '추가했어요';
+        if (photoSkipped) toast(`${done} · 사진은 인터넷이 연결되면 다시 붙여 주세요`);
+        else if (saved?.pending || pendingCount(t.id)) toast(`${done} · 연결되면 자동으로 저장돼요`);
+        else toast(done);
       } catch (err) {
         submitBtn.disabled = false;
         submitBtn.textContent = editing ? '저장' : '추가';
