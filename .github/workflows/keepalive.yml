@@ -29,3 +29,19 @@ jobs:
           done
           echo "::error::Supabase 응답 없음 — 대시보드에서 프로젝트가 일시정지됐는지 확인"
           exit 1
+
+      # 주인 없는 영수증 사진 정리 (방이 90일 정리됐거나, 지출에서 사진을 뺀 지 하루 지난 것)
+      # 삭제 권한은 Storage 정책이 "주인 없는 사진"에만 준다 — 공개 키로 다른 사진은 못 지운다
+      - name: Clean orphan receipts
+        env:
+          SUPABASE_URL: https://nkmkqczahmwqjddzpeqr.supabase.co
+          SUPABASE_KEY: sb_publishable_EkAloSEEewcCT4qyu6smSQ_gk4kDT_R
+        run: |
+          names=$(curl -s -X POST "$SUPABASE_URL/rest/v1/rpc/enb_orphan_receipts" \
+            -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' -d '{}')
+          count=$(echo "$names" | jq 'length')
+          echo "orphans: $count"
+          [ "$count" = "0" ] && exit 0
+          curl -s -X DELETE "$SUPABASE_URL/storage/v1/object/receipts" \
+            -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' \
+            -d "{\"prefixes\": $names}" | jq 'length' | xargs echo "deleted:"
