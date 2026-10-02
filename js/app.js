@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610021001';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610021001';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610021001';
+} from './settle.js?v=202610021040';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610021040';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610021040';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610021001';
+} from './share.js?v=202610021040';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
-  getSettings, setSetting, applyTheme,
-} from './native.js?v=202610021001';
+  getSettings, setSetting, applyTheme, pickPhoto, compressImage,
+} from './native.js?v=202610021040';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -301,7 +301,7 @@ function renderList(body, t) {
       const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES.find((c) => c.id === 'etc');
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
         <span class="cat-ico" aria-label="${cat.label}">${cat.emoji}</span>
-        <div class="grow"><div class="t">${esc(e.title)}</div>
+        <div class="grow"><div class="t">${esc(e.title)}${e.receipt ? ' <span class="rc-mark" aria-label="영수증 있음">🧾</span>' : ''}</div>
           <div class="muted small">${esc(nameOf(t, e.payerId))} 결제 · ${who}</div></div>
         <div class="amt num">${fmtMajor(e.amount, e.currency)}${baseLine}</div></div>`;
     }).join('')}`;
@@ -681,6 +681,8 @@ function expenseSheet(exp) {
     open: null,
     cat: e.category || guessCategory(e.title),
     catTouched: !!e.category, // 사용자가 직접 고르면 제목으로 추측하지 않는다
+    receipt: e.receipt || null, // 저장된 사진 경로
+    photo: null, // 새로 고른 사진(아직 안 올림)
   };
   if (st.mode !== 'parts') people.forEach((p) => st.parts.set(p.id, st.sel.has(p.id) ? 1 : 0));
 
@@ -694,6 +696,11 @@ function expenseSheet(exp) {
       <input class="input" name="title" maxlength="100" value="${esc(e.title)}" placeholder="어디에 썼나요? 예: 저녁 이자카야" aria-label="내용" required>
       <div class="cats" role="radiogroup" aria-label="카테고리">${CATEGORIES.map((c) =>
         `<button type="button" class="cat" role="radio" data-cat="${c.id}"><span>${c.emoji}</span>${c.label}</button>`).join('')}</div>
+      <div class="receipt-row">
+        <div id="rc-thumb" class="rc-thumb hidden"></div>
+        <button type="button" class="btn sm ghost" id="rc-camera">📷 영수증 찍기</button>
+        <button type="button" class="btn sm ghost" id="rc-gallery">🖼 앨범</button>
+      </div>
       <div id="fx" class="fx ${e.currency === t.baseCurrency ? 'hidden' : ''}">
         <label class="fx-row"><span id="rate-label">환율</span>
           <input class="input num fx-rate" name="rate" inputmode="decimal" value="${esc(e.rate)}"><span class="muted">${t.baseCurrency}</span></label>
@@ -827,6 +834,29 @@ function expenseSheet(exp) {
     };
     renderCats();
 
+    // ── 영수증 사진: 미리보기 썸네일, ×로 빼기, 누르면 크게 보기 ──
+    const thumb = el.querySelector('#rc-thumb');
+    let thumbUrl = null;
+    const renderThumb = async () => {
+      if (thumbUrl?.startsWith('blob:')) URL.revokeObjectURL(thumbUrl);
+      thumbUrl = st.photo ? URL.createObjectURL(st.photo) : st.receipt ? await store.receiptUrl(st.receipt).catch(() => null) : null;
+      thumb.classList.toggle('hidden', !thumbUrl);
+      thumb.innerHTML = thumbUrl ? `<img src="${esc(thumbUrl)}" alt="영수증"><button type="button" class="rc-x" aria-label="사진 빼기">×</button>` : '';
+      if (!thumbUrl) return;
+      thumb.querySelector('img').onclick = () => showPhoto(thumbUrl);
+      thumb.querySelector('.rc-x').onclick = () => { st.photo = null; st.receipt = null; renderThumb(); };
+    };
+    const choose = async (source) => {
+      const raw = await pickPhoto(source);
+      if (!raw) return;
+      try { st.photo = await compressImage(raw); } catch { return toast('사진을 읽지 못했어요'); }
+      haptic('tap');
+      renderThumb();
+    };
+    el.querySelector('#rc-camera').onclick = () => choose('camera');
+    el.querySelector('#rc-gallery').onclick = () => choose('gallery');
+    renderThumb();
+
     el.querySelectorAll('[data-split]').forEach((b) => {
       b.onclick = () => {
         const next = b.dataset.split;
@@ -915,7 +945,15 @@ function expenseSheet(exp) {
         payerId: st.payerId, shares, category: st.cat,
       };
       if (c !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
+      const submitBtn = f.querySelector('.btn.primary');
       try {
+        if (st.photo) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = '사진 올리는 중…';
+          data.receipt = await store.uploadReceipt(t.id, st.photo);
+        } else {
+          data.receipt = st.receipt; // 그대로 두거나, ×로 뺐으면 null
+        }
         if (editing) await store.updateExpense(t.id, exp.id, data);
         else await store.addExpense(t.id, data);
         try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
@@ -923,7 +961,11 @@ function expenseSheet(exp) {
         closeSheet(); renderTrip();
         feedback('add');
         toast(editing ? '저장했어요' : '추가했어요');
-      } catch (err) { report(err); }
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = editing ? '저장' : '추가';
+        report(err);
+      }
     };
   });
 }
@@ -985,6 +1027,16 @@ addEventListener('touchend', (e) => {
   view.slide = dx < 0 ? 'left' : 'right';
   location.hash = `#/t/${view.tripId}${next === 'list' ? '' : '/' + next}`;
 }, { passive: true });
+
+// 영수증 크게 보기 (화면 아무 데나 누르면 닫힘)
+function showPhoto(url) {
+  const v = document.createElement('div');
+  v.className = 'photo-viewer';
+  v.setAttribute('role', 'dialog');
+  v.innerHTML = `<img src="${esc(url)}" alt="영수증 사진"><span class="muted small">눌러서 닫기</span>`;
+  v.onclick = () => v.remove();
+  document.body.append(v);
+}
 
 // ───────── 설정 (오른쪽 위 ⚙) ─────────
 const GEAR = `<button type="button" class="icon-btn gear" data-settings aria-label="설정">
@@ -1065,6 +1117,8 @@ async function shareTrip(t) {
     onOpenHash: (h) => { if (location.hash !== h) location.hash = h; else route(); },
     // 안드로이드 뒤로가기: 시트 닫기 → 이전 화면 → (홈이면) 앱 종료
     onBack: () => {
+      const viewer = document.querySelector('.photo-viewer');
+      if (viewer) { viewer.remove(); return true; }
       if ($sheet.innerHTML) { closeSheet(); return true; }
       if (location.hash && location.hash !== '#/') { history.back(); return true; }
       return false;

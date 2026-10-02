@@ -112,6 +112,15 @@ export class LocalStore {
     t.settleMode = mode;
     this.#save(t);
   }
+  // 로컬 모드는 사진을 data URL로 지출에 그대로 담는다 (서버 없음)
+  async uploadReceipt(id, blob) {
+    return new Promise((res) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.readAsDataURL(blob);
+    });
+  }
+  async receiptUrl(path) { return path; }
   async logEvent() { /* 로컬 모드는 지표를 모으지 않는다 */ }
   subscribe(id, cb, onStatus) {
     onStatus?.('SUBSCRIBED');
@@ -186,6 +195,22 @@ export class CloudStore {
   async markSettled(id, on = true) {
     await this.#rpc('enb_mark_settled', { p_trip: id, p_on: on, p_admin: me.adminKey(id) || '' });
     this.#ping(id);
+  }
+  // 영수증: 비공개 버킷 receipts/<방id>/<무작위>.jpg — 방 id를 아는 사람만 올리고 볼 수 있다
+  #signed = new Map();
+  async uploadReceipt(id, blob) {
+    const path = `${id}/${uid(14)}.jpg`;
+    const { error } = await this.#sb.storage.from('receipts').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+    if (error) throw new Error(error.message);
+    return path;
+  }
+  async receiptUrl(path) {
+    const hit = this.#signed.get(path);
+    if (hit && hit.exp > Date.now()) return hit.url;
+    const { data, error } = await this.#sb.storage.from('receipts').createSignedUrl(path, 3600);
+    if (error) throw new Error(error.message);
+    this.#signed.set(path, { url: data.signedUrl, exp: Date.now() + 50 * 60 * 1000 });
+    return data.signedUrl;
   }
   async claimParticipant(id, pid) {
     await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid });

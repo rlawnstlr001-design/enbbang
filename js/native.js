@@ -13,6 +13,40 @@ const Notifs = plug('LocalNotifications');
 const App = plug('App');
 const Files = plug('Filesystem');
 const StatusBar = plug('StatusBar');
+const Camera = plug('Camera');
+
+// 영수증 사진 고르기. source: 'camera' | 'gallery'. 취소하면 null.
+// 앱은 네이티브 카메라·앨범, 웹은 파일 선택창(휴대폰 브라우저는 카메라도 고를 수 있음)
+export async function pickPhoto(source) {
+  if (isApp) {
+    try {
+      const opts = { quality: 75, targetWidth: 1600, targetHeight: 1600, correctOrientation: true };
+      const r = source === 'camera'
+        ? await Camera.takePhoto(opts)
+        : (await Camera.chooseFromGallery({ ...opts, mediaType: 0, limit: 1 })).results?.[0];
+      if (!r?.webPath) return null;
+      return await (await fetch(r.webPath)).blob();
+    } catch { return null; } // 취소·권한 거부
+  }
+  return new Promise((resolve) => {
+    const i = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*' });
+    if (source === 'camera') i.setAttribute('capture', 'environment');
+    i.onchange = () => resolve(i.files?.[0] || null);
+    i.click();
+  });
+}
+
+// 업로드 전에 긴 변 1600px JPEG로 줄인다 (2MB 버킷 한도, 데이터 절약)
+export async function compressImage(blob, max = 1600, quality = 0.72) {
+  const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale);
+  c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  return new Promise((res) => c.toBlob(res, 'image/jpeg', quality));
+}
 
 export async function nativeShare({ title, text, url }) {
   if (!isApp) return false;

@@ -221,3 +221,15 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
 #tab-body.slide-left { animation: slideFromRight .22s ease-out; }
 #tab-body.slide-right { animation: slideFromLeft .22s ease-out; }
 @media (prefers-reduced-motion: reduce) { #tab-body.slide-left, #tab-body.slide-right { animation: none; } }
+
+/* ── 영수증 사진 (2026-10-02) ── */
+.receipt-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rc-thumb { position: relative; width: 56px; height: 56px; flex: none; }
+.rc-thumb img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+.rc-x { position: absolute; top: -8px; right: -8px; width: 26px; height: 26px; border-radius: 99px; border: 0;
+  background: var(--text); color: var(--bg); font-size: 16px; line-height: 1; cursor: pointer; }
+.rc-mark { font-size: 13px; }
+.photo-viewer { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top)); }
+.photo-viewer img { max-width: 100%; max-height: 85vh; object-fit: contain; border-radius: 8px; }
+.photo-viewer span { color: #ccc; }
