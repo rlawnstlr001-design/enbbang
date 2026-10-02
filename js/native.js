@@ -33,10 +33,80 @@ export async function nativeShareImage(blob, filename, title) {
   return true;
 }
 
-export function haptic(kind = 'light') {
-  if (!isApp) return;
-  const p = kind === 'success' ? Haptics.notification({ type: 'SUCCESS' }) : Haptics.impact({ style: kind === 'medium' ? 'MEDIUM' : 'LIGHT' });
-  p.catch(() => {});
+// ───── 설정 (이 기기에만 저장) ─────
+const SETTINGS_KEY = 'enbbang:settings';
+const DEFAULTS = { vibration: 'long', sound: true, theme: 'system', alarmHour: 10 };
+
+export function getSettings() {
+  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { ...DEFAULTS }; }
+}
+export function setSetting(key, value) {
+  const s = getSettings();
+  s[key] = value;
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* 저장 불가 */ }
+  if (key === 'theme') applyTheme();
+}
+export function applyTheme() {
+  const t = getSettings().theme;
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+
+// ───── 진동 ─────
+// kind: 'tap'(가벼운 누름) | 'add'(저장) | 'paid'(송금 완료) | 'done'(정산 끝)
+// 안드로이드는 길이(ms)로 "위이잉"을 낸다. iOS는 길이 조절이 안 돼 햅틱 종류로 구분.
+const VIBE_MS = {
+  short: { tap: 25, add: 70, paid: 90, done: 140 },
+  long: { tap: 45, add: 260, paid: 320, done: 520 },
+};
+export function haptic(kind = 'tap') {
+  const level = getSettings().vibration;
+  if (level === 'off') return;
+  const ms = (VIBE_MS[level] || VIBE_MS.long)[kind] ?? 60;
+  if (isApp && platform === 'ios') {
+    const p = kind === 'tap' ? Haptics.impact({ style: level === 'long' ? 'MEDIUM' : 'LIGHT' }) : Haptics.notification({ type: 'SUCCESS' });
+    p.catch(() => {});
+  } else if (isApp) {
+    Haptics.vibrate({ duration: ms }).catch(() => {});
+  } else {
+    try { navigator.vibrate?.(ms); } catch { /* 지원 안 함 */ }
+  }
+}
+
+// ───── 효과음 (파일 없이 Web Audio로 합성) ─────
+let audio;
+const TONES = {
+  tap: [[700, 0.04]],
+  add: [[880, 0.07], [1320, 0.12]],
+  paid: [[660, 0.07], [990, 0.07], [1320, 0.14]],
+  done: [[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.24]],
+};
+export function sound(kind = 'tap') {
+  if (!getSettings().sound) return;
+  try {
+    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+    let t = audio.currentTime;
+    for (const [freq, dur] of TONES[kind] || TONES.tap) {
+      const o = audio.createOscillator();
+      const g = audio.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(kind === 'tap' ? 0.05 : 0.16, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(audio.destination);
+      o.start(t);
+      o.stop(t + dur + 0.02);
+      t += dur * 0.9;
+    }
+  } catch { /* 소리 재생 불가 환경 */ }
+}
+
+// 진동 + 효과음을 한 번에
+export function feedback(kind) {
+  haptic(kind);
+  sound(kind);
 }
 
 // 정산 리마인드 로컬 알림. 같은 방·같은 송금은 같은 id라 다시 예약하면 덮어쓴다.

@@ -206,3 +206,10 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
 .is-app .top { padding-top: calc(14px + env(safe-area-inset-top)); }
 .is-app .hero { padding-top: calc(24px + env(safe-area-inset-top)); }
 .is-app #netbar { padding-top: calc(10px + env(safe-area-inset-top)); }
+
+/* ── 설정 (2026-10-02) ── */
+.gear { color: var(--muted); }
+.gear:active { transform: rotate(30deg); }
+.about { padding: 12px; }
+.about > * + * { margin-top: 8px; }
+.top .gear { margin-left: -4px; }

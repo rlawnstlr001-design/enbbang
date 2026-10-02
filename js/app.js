@@ -1,13 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610020837';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610020837';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610020837';
+} from './settle.js?v=202610020914';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610020914';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610020914';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610020837';
-import { isApp, SITE, nativeShare, nativeShareImage, haptic, scheduleReminder, initNative } from './native.js?v=202610020837';
+} from './share.js?v=202610020914';
+import {
+  isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
+  getSettings, setSetting, applyTheme,
+} from './native.js?v=202610020914';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -99,7 +102,7 @@ function renderHome() {
   $app.innerHTML = `
     <div class="hero">
       <div class="row between"><span class="brand"><i>N</i>트립N빵</span>
-        <span class="badge">${store.mode === 'cloud' ? '베타' : '로컬 모드'}</span></div>
+        <span class="row"><span class="badge">${store.mode === 'cloud' ? '베타' : '로컬 모드'}</span>${GEAR}</span></div>
       <h1>여행 정산,<br>링크 하나로 끝.</h1>
       <p>같이 쓴 돈을 다 같이 적으면, 누가 누구에게 얼마 보낼지 <b>최소 송금</b>으로 정리해 드려요.</p>
     </div>
@@ -233,6 +236,7 @@ function renderTrip() {
         <h1 class="grow">${esc(t.name)}</h1>
         ${t.settledAt ? '<span class="badge">정산 완료</span>' : ''}
         <button class="btn sm primary" id="share">친구 초대</button>
+        ${GEAR}
       </div>
       <nav class="tabs" role="tablist">${tabs.map(([k, l]) =>
         `<button role="tab" aria-selected="${view.tab === k}" data-tab="${k}">${l}</button>`).join('')}</nav>
@@ -432,9 +436,10 @@ function renderSettle(body, t, result) {
           payerId: x.from, shares: [{ pid: x.to, w: 1 }],
         });
         view.trip = await store.getTrip(t.id);
-        if (!settle(view.trip).pending.length) store.logEvent(t.id, 'all_paid');
+        const finished = !settle(view.trip).pending.length;
+        if (finished) store.logEvent(t.id, 'all_paid');
         renderTrip();
-        haptic('success');
+        feedback(finished ? 'done' : 'paid');
         toast(`${nameOf(t, x.from)} → ${nameOf(t, x.to)} 송금 완료로 표시했어요`);
       } catch (err) { b.disabled = false; report(err); }
     };
@@ -457,7 +462,7 @@ function renderSettle(body, t, result) {
     b.onclick = async () => {
       const at = new Date();
       at.setDate(at.getDate() + 1);
-      at.setHours(10, 0, 0, 0);
+      at.setHours(getSettings().alarmHour, 0, 0, 0);
       const r = await scheduleReminder({
         key: `${t.id}:${x.from}:${x.to}`,
         title: `${t.name} 정산`,
@@ -465,7 +470,7 @@ function renderSettle(body, t, result) {
         at,
         hash: `#/t/${t.id}/settle`,
       });
-      if (r === 'scheduled') { haptic(); toast('내일 오전 10시에 알려 드릴게요'); }
+      if (r === 'scheduled') { haptic('tap'); toast(`내일 ${hourLabel(getSettings().alarmHour)}에 알려 드릴게요`); }
       else if (r === 'denied') toast('알림 권한이 꺼져 있어요. 휴대폰 설정에서 켜 주세요');
     };
   });
@@ -915,12 +920,55 @@ function expenseSheet(exp) {
         try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
         view.trip = await store.getTrip(t.id);
         closeSheet(); renderTrip();
-        haptic('success');
+        feedback('add');
         toast(editing ? '저장했어요' : '추가했어요');
       } catch (err) { report(err); }
     };
   });
 }
+
+// ───────── 설정 (오른쪽 위 ⚙) ─────────
+const GEAR = `<button type="button" class="icon-btn gear" data-settings aria-label="설정">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg></button>`;
+
+const hourLabel = (h) => (h < 12 ? `오전 ${h}시` : h === 12 ? '오후 12시' : `오후 ${h - 12}시`);
+
+function settingsSheet() {
+  const s = getSettings();
+  const seg = (key, opts) => `<div class="seg small-seg" role="radiogroup">${opts.map(([v, l]) =>
+    `<button type="button" role="radio" data-set="${key}" data-val="${v}" aria-checked="${String(s[key]) === v}">${l}</button>`).join('')}</div>`;
+  const hours = Array.from({ length: 15 }, (_, i) => i + 7)
+    .map((h) => `<option value="${h}" ${h === s.alarmHour ? 'selected' : ''}>${hourLabel(h)}</option>`).join('');
+  openSheet(`
+    <h2>설정</h2>
+    <div class="stack">
+      <div class="field"><span>진동</span>${seg('vibration', [['off', '끔'], ['short', '짧게'], ['long', '길게']])}</div>
+      <div class="field"><span>효과음</span>${seg('sound', [['false', '끔'], ['true', '켬']])}</div>
+      <div class="field"><span>화면</span>${seg('theme', [['system', '휴대폰 설정'], ['light', '밝게'], ['dark', '어둡게']])}</div>
+      ${isApp ? `<label class="field"><span>"내일 알림" 시각</span><select class="input" id="alarm-hour">${hours}</select></label>` : ''}
+      <div class="card about small">
+        <div class="row between"><span class="muted">버전</span><b>${esc(window.APP_VERSION || '웹')}</b></div>
+        <div class="row between"><a href="privacy.html">개인정보처리방침</a><a href="mailto:enbbanghaza@gmail.com?subject=${encodeURIComponent('트립N빵 문의')}">문의하기</a></div>
+      </div>
+      <button type="button" class="btn block" id="set-close">닫기</button>
+    </div>`, (el) => {
+    el.querySelectorAll('[data-set]').forEach((b) => {
+      b.onclick = () => {
+        const key = b.dataset.set;
+        const val = key === 'sound' ? b.dataset.val === 'true' : b.dataset.val;
+        setSetting(key, val);
+        el.querySelectorAll(`[data-set="${key}"]`).forEach((x) => x.setAttribute('aria-checked', x === b));
+        if (key === 'vibration') haptic('add'); // 바꾼 세기를 바로 느껴 보게
+        if (key === 'sound' && val) feedback('add');
+      };
+    });
+    el.querySelector('#alarm-hour')?.addEventListener('change', (e) => setSetting('alarmHour', Number(e.target.value)));
+    el.querySelector('#set-close').onclick = closeSheet;
+  });
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-settings]')) settingsSheet(); });
 
 function lastCurrency(t) {
   try { return localStorage.getItem(`enbbang:lastcur:${t.id}`) || t.baseCurrency; } catch { return t.baseCurrency; }
@@ -950,6 +998,7 @@ async function shareTrip(t) {
 (async () => {
   // ?local=1 — 테스트·시연용. 실서버 지표를 오염시키지 않도록 로컬 모드로 강제
   const forceLocal = new URLSearchParams(location.search).has('local');
+  applyTheme(); // 저장된 화면 테마 먼저
   store = await createStore(forceLocal ? null : window.ENBBANG_CONFIG);
   window.__enbbang = { store }; // 디버깅용
   addEventListener('hashchange', route);
