@@ -1,6 +1,6 @@
 // 공유 — 로컬 모드 스냅샷 링크 / 카톡 붙여넣기용 텍스트 / 세로 이미지 카드 / 송금 링크
 
-import { fromMinor } from './settle.js?v=202610020914';
+import { fromMinor } from './settle.js?v=202610021001';
 
 // ───── 스냅샷 (로컬 모드 전용: 링크 안에 방 전체를 압축해 담는다) ─────
 const b64url = {

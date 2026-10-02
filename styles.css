@@ -213,3 +213,11 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
 .about { padding: 12px; }
 .about > * + * { margin-top: 8px; }
 .top .gear { margin-left: -4px; }
+
+/* ── 탭 스와이프 (2026-10-02) ── */
+#tab-body { touch-action: pan-y; will-change: transform; }
+@keyframes slideFromRight { from { transform: translateX(40%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slideFromLeft { from { transform: translateX(-40%); opacity: 0; } to { transform: none; opacity: 1; } }
+#tab-body.slide-left { animation: slideFromRight .22s ease-out; }
+#tab-body.slide-right { animation: slideFromLeft .22s ease-out; }
+@media (prefers-reduced-motion: reduce) { #tab-body.slide-left, #tab-body.slide-right { animation: none; } }

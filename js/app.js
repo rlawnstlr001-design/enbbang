@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610020914';
-import { createStore, me, recentTrips, deviceId } from './store.js?v=202610020914';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610020914';
+} from './settle.js?v=202610021001';
+import { createStore, me, recentTrips, deviceId } from './store.js?v=202610021001';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610021001';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610020914';
+} from './share.js?v=202610021001';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme,
-} from './native.js?v=202610020914';
+} from './native.js?v=202610021001';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -258,6 +258,7 @@ function renderTrip() {
   if (add) add.onclick = () => expenseSheet();
 
   const body = $app.querySelector('#tab-body');
+  if (view.slide) { body.classList.add(`slide-${view.slide}`); view.slide = null; } // 스와이프로 왔으면 밀려 들어오기
   if (view.tab === 'settle') renderSettle(body, t, result);
   else if (view.tab === 'people') renderPeople(body, t);
   else renderList(body, t);
@@ -926,6 +927,64 @@ function expenseSheet(exp) {
     };
   });
 }
+
+// ───────── 탭 스와이프 (지출 ↔ 정산 ↔ 멤버) ─────────
+// 손가락을 왼쪽으로 밀면 오른쪽 탭, 오른쪽으로 밀면 왼쪽 탭 (갤럭시·카톡 탭과 같은 방향)
+const TAB_ORDER = ['list', 'settle', 'people'];
+const swipe = { x: 0, y: 0, t: 0, active: false, decided: false, horizontal: false };
+const SWIPE_IGNORE = 'input, textarea, select, .cats, .scrim, .seg, .chips, [data-noswipe]';
+
+function swipeTarget(dir) {
+  const i = TAB_ORDER.indexOf(view.tab) + dir;
+  return i >= 0 && i < TAB_ORDER.length ? TAB_ORDER[i] : null;
+}
+
+addEventListener('touchstart', (e) => {
+  const tch = e.touches[0];
+  swipe.active = false;
+  if (!view.tripId || e.touches.length > 1 || $sheet.innerHTML) return;
+  // 화면 가장자리는 안드로이드 "뒤로가기" 제스처 영역이라 양보
+  if (tch.clientX < 24 || tch.clientX > innerWidth - 24) return;
+  if (e.target.closest(SWIPE_IGNORE)) return;
+  Object.assign(swipe, { x: tch.clientX, y: tch.clientY, t: Date.now(), active: true, decided: false, horizontal: false });
+}, { passive: true });
+
+addEventListener('touchmove', (e) => {
+  if (!swipe.active) return;
+  const dx = e.touches[0].clientX - swipe.x;
+  const dy = e.touches[0].clientY - swipe.y;
+  if (!swipe.decided && Math.hypot(dx, dy) > 12) {
+    swipe.decided = true;
+    swipe.horizontal = Math.abs(dx) > Math.abs(dy) * 1.4;
+  }
+  if (!swipe.horizontal) return;
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  const edge = !swipeTarget(dx < 0 ? 1 : -1); // 끝 탭이면 살짝만 따라오게
+  body.style.transition = 'none';
+  body.style.transform = `translateX(${dx * (edge ? 0.15 : 0.45)}px)`;
+  body.style.opacity = String(1 - Math.min(Math.abs(dx) / 900, 0.25));
+}, { passive: true });
+
+addEventListener('touchend', (e) => {
+  if (!swipe.active) return;
+  swipe.active = false;
+  const body = document.getElementById('tab-body');
+  const reset = () => {
+    if (!body) return;
+    body.style.transition = 'transform .2s ease, opacity .2s ease';
+    body.style.transform = '';
+    body.style.opacity = '';
+  };
+  if (!swipe.horizontal) return reset();
+  const dx = e.changedTouches[0].clientX - swipe.x;
+  const fast = Date.now() - swipe.t < 300 && Math.abs(dx) > 60;
+  const next = Math.abs(dx) > innerWidth * 0.22 || fast ? swipeTarget(dx < 0 ? 1 : -1) : null;
+  if (!next) return reset();
+  haptic('tap');
+  view.slide = dx < 0 ? 'left' : 'right';
+  location.hash = `#/t/${view.tripId}${next === 'list' ? '' : '/' + next}`;
+}, { passive: true });
 
 // ───────── 설정 (오른쪽 위 ⚙) ─────────
 const GEAR = `<button type="button" class="icon-btn gear" data-settings aria-label="설정">
