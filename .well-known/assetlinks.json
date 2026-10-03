@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tripnbbang.app",
+      "sha256_cert_fingerprints": [
+        "0D:EE:70:50:FC:8C:57:68:48:51:F8:1A:3D:BF:C8:18:4C:2F:D7:21:FD:25:BB:0B:BF:D6:D5:8F:43:92:7A:9F"
+      ]
+    }
+  }
+]
