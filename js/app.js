@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610041015';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610041015';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610041015';
+} from './settle.js?v=202610041024';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610041024';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610041024';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610041015';
+} from './share.js?v=202610041024';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610041015';
+} from './native.js?v=202610041024';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -223,7 +223,7 @@ async function importSnapshot(data) {
     const t = await decodeSnapshot(data);
     if (!t?.id || !Array.isArray(t.participants)) throw new Error('bad');
     if (store.mode === 'local') await store.importSnapshot(t);
-    location.replace(`#/t/${t.id}`);
+    replaceHash(`#/t/${t.id}`);
   } catch {
     $app.innerHTML = `<div class="empty">링크가 손상됐어요. 보낸 사람에게 다시 받아 주세요.<br><br><a href="#/">처음으로</a></div>`;
   }
@@ -1154,6 +1154,32 @@ async function shareTrip(t) {
   copy(`${text}\n${url}`, store.mode === 'cloud' ? '초대 링크를 복사했어요. 단톡방에 붙여 넣으세요' : '현재 상태 링크를 복사했어요');
 }
 
+// ───────── 안드로이드 뒤로가기 ─────────
+// 앱 안에서 이동한 만큼만 뒤로 간다(history.state.d = 깊이). 링크·알림으로 바로 열린 화면은 돌아갈 기록이 없어서
+// 예전처럼 history.back()을 부르면 아무 반응이 없었다 → 첫 화면으로 보고 "한 번 더 누르면 종료"
+let depth = 0;
+let replacing = false;
+let backAt = 0;
+function replaceHash(h) { replacing = true; location.replace(h); }
+function onHashChange() {
+  const d = history.state?.d;
+  if (replacing) { replacing = false; history.replaceState({ d: depth }, ''); }
+  else if (typeof d === 'number') depth = d;
+  else { depth += 1; history.replaceState({ d: depth }, ''); }
+  route();
+}
+// true = 앱이 처리함, false = 앱 종료
+function onBack() {
+  const viewer = document.querySelector('.photo-viewer');
+  if (viewer) { viewer.remove(); return true; }
+  if ($sheet.innerHTML) { closeSheet(); return true; }
+  if (depth > 0) { history.back(); return true; }
+  if (Date.now() - backAt < 2000) return false;
+  backAt = Date.now();
+  toast('한 번 더 누르면 종료돼요');
+  return true;
+}
+
 // ───────── 시작 ─────────
 (async () => {
   // ?local=1 — 테스트·시연용. 실서버 지표를 오염시키지 않도록 로컬 모드로 강제
@@ -1161,17 +1187,12 @@ async function shareTrip(t) {
   applyTheme(); // 저장된 화면 테마 먼저
   store = await createStore(forceLocal ? null : window.ENBBANG_CONFIG);
   window.__enbbang = { store }; // 디버깅용
-  addEventListener('hashchange', route);
+  history.replaceState({ d: 0 }, '');
+  addEventListener('hashchange', onHashChange);
   initNative({
     onOpenHash: (h) => { if (location.hash !== h) location.hash = h; else route(); },
-    // 안드로이드 뒤로가기: 시트 닫기 → 이전 화면 → (홈이면) 앱 종료
-    onBack: () => {
-      const viewer = document.querySelector('.photo-viewer');
-      if (viewer) { viewer.remove(); return true; }
-      if ($sheet.innerHTML) { closeSheet(); return true; }
-      if (location.hash && location.hash !== '#/') { history.back(); return true; }
-      return false;
-    },
+    // 안드로이드 뒤로가기: 사진·시트 닫기 → 앱 안에서 온 이전 화면 → (첫 화면이면) 두 번 눌러 종료
+    onBack,
   });
   route();
 })();
