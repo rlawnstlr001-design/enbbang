@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610021529';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610021529';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610021529';
+} from './settle.js?v=202610041015';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610041015';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610041015';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610021529';
+} from './share.js?v=202610041015';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610021529';
+} from './native.js?v=202610041015';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -104,10 +104,35 @@ async function route() {
   if (view.unsub) { view.unsub(); view.unsub = null; }
   closeSheet();
   const h = location.hash.slice(1);
+  // 웹에서 주소만 열면 소개 페이지 (본문은 index.html에 정적으로). #/… 링크와 앱은 바로 앱 화면, #/start = 방 만들기
+  const landing = !isApp && !h.startsWith('/');
+  const wasLanding = document.documentElement.classList.contains('landing');
+  document.documentElement.classList.toggle('landing', landing);
+  if (landing) return renderLanding();
+  if (wasLanding) scrollTo(0, 0);
   let m;
   if ((m = h.match(/^\/t\/([\w-]+)(?:\/(\w+))?/))) return openTrip(m[1], m[2] || 'list');
   if ((m = h.match(/^\/s\/(.+)$/))) return importSnapshot(m[1]);
   renderHome();
+}
+
+// ───────── 소개 페이지 (웹) ─────────
+// 최근 여행방 바로가기와 스토어 버튼만 채운다
+function renderLanding() {
+  view = { ...view, tripId: null, trip: null };
+  const recent = recentTrips();
+  const $r = document.getElementById('lp-recent');
+  if ($r && recent.length) {
+    $r.innerHTML = `최근 여행방: ${recent.slice(0, 3).map((t) => `<a href="#/t/${esc(t.id)}">${esc(t.name)}</a>`).join(' · ')}`;
+    $r.hidden = false;
+  }
+  const st = window.ENBBANG_CONFIG?.stores || {};
+  const $s = document.getElementById('lp-store');
+  if ($s && (st.android || st.ios)) {
+    $s.innerHTML = [st.android && `<a class="btn" href="${esc(st.android)}" rel="noopener">Google Play에서 받기</a>`,
+      st.ios && `<a class="btn" href="${esc(st.ios)}" rel="noopener">App Store에서 받기</a>`].filter(Boolean).join('');
+    $s.classList.add('has-links');
+  }
 }
 
 // ───────── 홈 ─────────

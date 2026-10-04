@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" class="landing">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>트립N빵 — 여행 정산</title>
-  <meta name="description" content="링크 하나로 여행 경비 정산. 선결제·일부 참여·외화까지, 최소 송금으로 끝.">
+  <title>트립N빵 — 해외여행 경비 정산, 링크 하나로</title>
+  <meta name="description" content="여행 경비를 링크 하나로 같이 적고, 누가 누구에게 얼마 보낼지 최소 송금으로 정리해요. 외화·카드 청구 원화·일부만 낸 지출까지.">
+  <link rel="canonical" href="https://tripnbbang.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="트립N빵">
   <meta property="og:url" content="https://tripnbbang.com/">
@@ -18,14 +19,108 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23FF7A1A'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='800'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=202610021529">
-  <script src="config.js?v=202610021529"></script>
+  <link rel="stylesheet" href="styles.css?v=202610041015">
+  <script src="config.js?v=202610041015"></script>
+  <script>
+    // 소개 페이지는 웹에서 주소만 열었을 때만(#how 같은 쪽 안 이동 포함). 앱 안이거나 #/… 링크면 바로 앱 화면 (깜빡임 방지)
+    if (location.hash.startsWith('#/') || window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.remove('landing');
+  </script>
 </head>
 <body>
+  <main id="landing">
+    <header class="lp-top">
+      <span class="brand"><i>N</i>트립N빵</span>
+      <a class="lp-top-link" href="#/start">여행방 만들기</a>
+    </header>
+
+    <section class="lp-hero">
+      <div>
+        <p class="lp-kicker">해외여행 경비 정산</p>
+        <h1>여행 정산,<br><em>링크 하나로</em> 끝.</h1>
+        <p class="lp-lead">단톡방에 링크 하나 올리면 다 같이 쓴 돈을 적어요. 엔화·달러로 쓴 돈도, 몇 명만 낸 술값도 계산해서 <b>누가 누구에게 얼마 보낼지 최소 송금</b>으로 정리해 드려요.</p>
+        <div class="lp-cta">
+          <a class="btn primary" href="#/start">여행방 만들기</a>
+          <a class="btn ghost" href="#how">어떻게 쓰나요</a>
+        </div>
+        <p class="lp-store" id="lp-store">안드로이드·아이폰 앱은 출시 준비 중이에요. 지금은 웹에서 바로 써 볼 수 있어요.</p>
+        <p class="lp-recent" id="lp-recent" hidden></p>
+      </div>
+      <div class="lp-receipt" aria-hidden="true">
+        <p class="rc-head"><b>오사카 3박 4일</b><span>4명 · 지출 23건</span></p>
+        <ul class="rc-lines">
+          <li><span>🍜 라멘 (4명)</span><span>¥4,780</span></li>
+          <li><span>🚃 공항 열차 (4명)</span><span>¥5,880</span></li>
+          <li><span>🍺 이자카야 (3명)</span><span>¥12,400</span></li>
+          <li><span>🏨 숙소 (선결제)</span><span>612,000원</span></li>
+        </ul>
+        <p class="rc-sum"><span>정산 결과</span><b>송금 3번이면 끝</b></p>
+        <ul class="rc-xfer">
+          <li><span>민지 → 준식</span><b>186,500원</b></li>
+          <li><span>서연 → 준식</span><b>92,300원</b></li>
+          <li><span>도윤 → 서연</span><b>41,000원</b></li>
+        </ul>
+        <p class="rc-note">예시 화면</p>
+      </div>
+    </section>
+
+    <section class="lp-sec">
+      <h2 class="lp-h">여행 정산이 꼬이는 순간들</h2>
+      <div class="lp-grid four">
+        <article class="lp-tile"><b>💴 외화로 쓴 돈</b><p>엔화 현금, 달러 카드값, 원화 선결제가 섞여 환율 계산이 어려울 때.</p></article>
+        <article class="lp-tile"><b>💳 카드 청구액이 달라요</b><p>나중에 카드 명세서에 찍힌 원화 금액이 환율로 계산한 값과 다를 때.</p></article>
+        <article class="lp-tile"><b>🍺 몇 명만 낸 지출</b><p>술 마신 사람만, 투어 간 사람만 나눠야 하는 지출이 섞일 때.</p></article>
+        <article class="lp-tile"><b>🔁 송금이 줄줄이</b><p>서로 주고받다 보니 누가 누구에게 몇 번 보내야 하는지 헷갈릴 때.</p></article>
+      </div>
+    </section>
+
+    <section class="lp-sec" id="how">
+      <h2 class="lp-h">세 단계면 정산까지</h2>
+      <ol class="lp-pass">
+        <li><span class="lp-pass-no">01</span><div><b>여행방 만들기</b><p>여행 이름, 함께 가는 사람, 정산 통화만 정하면 방이 생겨요.</p></div><span class="lp-pass-stub">START</span></li>
+        <li><span class="lp-pass-no">02</span><div><b>단톡방에 링크 보내기</b><p>링크를 받은 사람은 자기 이름을 고르고 바로 같이 적어요.</p></div><span class="lp-pass-stub">SHARE</span></li>
+        <li><span class="lp-pass-no">03</span><div><b>쓴 돈 적고 정산 보기</b><p>정산표는 적는 대로 바로 계산돼요. 정산 결과를 카톡으로 보내면 끝.</p></div><span class="lp-pass-stub">DONE</span></li>
+      </ol>
+    </section>
+
+    <section class="lp-sec">
+      <h2 class="lp-h">트립N빵으로 할 수 있는 것</h2>
+      <div class="lp-grid three">
+        <article class="lp-tile"><b>🧮 최소 송금 계산</b><p>각자 낸 돈과 몫의 차이를 계산해 송금 횟수가 가장 적은 방법을 찾아요. 낸 사람에게 바로 보내는 방식도 고를 수 있어요.</p></article>
+        <article class="lp-tile"><b>🌏 외화와 참고 환율</b><p>통화를 바꾸면 참고 환율이 자동으로 채워져요. 카드 명세서의 실제 원화 청구액을 넣으면 그 금액이 우선이에요.</p></article>
+        <article class="lp-tile"><b>✂️ 나누는 방법 고르기</b><p>지출마다 나눌 사람을 고르고 똑같이 · 몫대로 · 금액 직접 중에서 정해요. 먼저 떠난 사람은 이후 지출에서만 뺄 수 있어요.</p></article>
+        <article class="lp-tile"><b>🧾 영수증 사진</b><p>지출에 영수증 사진을 붙여 두면 나중에 다 같이 확인할 수 있어요.</p></article>
+        <article class="lp-tile"><b>💸 송금 버튼</b><p>받을 사람이 토스 아이디·카카오페이 송금 링크·계좌를 넣어 두면 정산 화면에 송금 버튼이 생겨요. 트립N빵은 돈을 직접 보내거나 보관하지 않아요.</p></article>
+        <article class="lp-tile"><b>📶 연결이 끊겨도 입력</b><p>비행기 안이나 데이터가 약한 곳에서 적은 지출은 저장 대기로 두었다가, 연결되면 자동으로 저장돼요.</p></article>
+      </div>
+    </section>
+
+    <section class="lp-sec lp-faq">
+      <h2 class="lp-h">자주 묻는 질문</h2>
+      <details><summary>같이 가는 사람들은 어떻게 들어오나요?</summary><p>여행방 링크를 단톡방에 올리면, 받은 사람이 링크를 열고 자기 이름을 골라 바로 같이 적을 수 있어요.</p></details>
+      <details><summary>정산은 어떻게 계산되나요?</summary><p>각자 낸 돈과 써야 할 몫의 차이를 계산한 뒤, 송금 횟수가 가장 적은 방법을 찾아 줘요. 어느 방식이든 각자 부담하는 총액은 같아요.</p></details>
+      <details><summary>환율은 어디 기준인가요?</summary><p>지출을 넣을 때 참고 환율을 자동으로 채워요. 실제로 카드에 청구된 원화 금액을 알면 그 금액을 넣는 게 가장 정확해요.</p></details>
+      <details><summary>잘못 넣은 지출은 고칠 수 있나요?</summary><p>지출을 눌러 고치거나 지울 수 있어요. 지운 직후 화면 아래 '되돌리기'를 5초 안에 누르면 되살릴 수 있어요.</p></details>
+      <details><summary>여행방은 언제까지 보관되나요?</summary><p>마지막 이용 후 90일이 지나면 자동으로 삭제돼요. 바로 지우고 싶으면 문의 메일로 여행방 링크를 보내 주세요. 자세한 내용은 <a href="privacy.html">개인정보처리방침</a>에 있어요.</p></details>
+      <p class="lp-more"><a href="support.html">도움말 전체 보기 →</a></p>
+    </section>
+
+    <section class="lp-sec lp-final">
+      <p class="lp-final-tag">✈️ 다음 여행 정산은</p>
+      <h2 class="lp-h">링크 하나로 끝내 볼까요?</h2>
+      <a class="btn primary" href="#/start">여행방 만들기</a>
+    </section>
+
+    <footer class="lp-foot">
+      <span class="brand"><i>N</i>트립N빵</span>
+      <p>운영: 트립N빵 운영팀 · 문의 <a href="mailto:enbbanghaza@gmail.com">enbbanghaza@gmail.com</a></p>
+      <p><a href="support.html">도움말</a> · <a href="privacy.html">개인정보처리방침</a></p>
+    </footer>
+  </main>
+
   <div id="netbar" role="alert" hidden></div>
   <div id="app" aria-live="polite"><div class="boot">불러오는 중…</div></div>
   <div id="sheet-root"></div>
   <div id="toast" role="status"></div>
-  <script type="module" src="js/app.js?v=202610021529"></script>
+  <script type="module" src="js/app.js?v=202610041015"></script>
 </body>
 </html>

@@ -1,2 +1,5 @@
 User-agent: *
+Allow: /
 Disallow: /beta/
+
+Sitemap: https://tripnbbang.com/sitemap.xml

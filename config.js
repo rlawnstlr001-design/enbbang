@@ -6,4 +6,6 @@
 window.ENBBANG_CONFIG = {
   supabaseUrl: 'https://nkmkqczahmwqjddzpeqr.supabase.co',
   supabaseAnonKey: 'sb_publishable_EkAloSEEewcCT4qyu6smSQ_gk4kDT_R',
+  // 스토어 주소 — 정식 출시되면 채운다. 비어 있으면 소개 페이지에 '출시 준비 중'으로 보인다
+  stores: { android: '', ios: '' },
 };

@@ -236,3 +236,74 @@ label.field.date-row { display: flex; align-items: center; gap: 10px; }
 
 /* 오프라인으로 넣어 아직 서버에 못 간 지출 */
 .badge.pending { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+
+/* ── 소개 페이지 (웹에서 주소만 열었을 때. html.landing일 때만) — 주황 + 영수증·탑승권 ── */
+#landing { display: none; }
+html.landing #landing { display: block; }
+html.landing #app, html.landing #netbar { display: none !important; }
+#landing { max-width: 1060px; margin: 0 auto; padding: 0 20px 40px; }
+.lp-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; padding: calc(12px + env(safe-area-inset-top)) 0 10px; background: var(--bg); }
+.lp-top-link { font-weight: 800; font-size: 15px; text-decoration: none; color: #fff; background: var(--accent); padding: 9px 16px; border-radius: 12px; }
+.lp-hero { display: grid; gap: 30px; align-items: center; padding: 26px 0 8px; }
+.lp-kicker { display: inline-block; margin: 0; font-size: 13px; font-weight: 800; color: var(--accent-ink); background: var(--accent-soft); padding: 4px 10px; border-radius: 99px; }
+.lp-hero h1 { font-size: clamp(36px, 7vw, 58px); line-height: 1.12; letter-spacing: -1.5px; margin: 14px 0 0; font-weight: 900; word-break: keep-all; }
+.lp-hero h1 em { font-style: normal; color: var(--accent); }
+.lp-lead { font-size: 18px; color: var(--muted); margin: 16px 0 0; max-width: 31em; word-break: keep-all; }
+.lp-lead b { color: var(--text); }
+.lp-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.lp-cta .btn, .lp-final .btn, .lp-store .btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; padding: 14px 26px; font-size: 17px; }
+.lp-cta .btn.primary, .lp-final .btn.primary { color: #fff; box-shadow: 0 8px 22px rgba(255, 122, 26, .35); }
+.lp-store { margin: 16px 0 0; font-size: 14px; color: var(--muted); word-break: keep-all; }
+.lp-store.has-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.lp-recent { margin: 12px 0 0; font-size: 15px; font-weight: 700; }
+/* 영수증: 아래가 톱니 모양 */
+.lp-receipt { position: relative; width: min(360px, 100%); justify-self: center; background: var(--surface); padding: 22px 22px 34px; box-shadow: 0 14px 40px rgba(80, 50, 10, .14);
+  border-radius: 14px 14px 0 0; transform: rotate(1.5deg); font-variant-numeric: tabular-nums; }
+.lp-receipt::after { content: ""; position: absolute; left: 0; right: 0; bottom: -12px; height: 12px;
+  background: linear-gradient(-45deg, transparent 8px, var(--surface) 0) 0 0 / 16px 12px repeat-x, linear-gradient(45deg, transparent 8px, var(--surface) 0) 0 0 / 16px 12px repeat-x; }
+.rc-head { margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.rc-head b { font-size: 18px; } .rc-head span { color: var(--muted); font-size: 13px; }
+.rc-lines, .rc-xfer { list-style: none; margin: 0; padding: 0; }
+.rc-lines li, .rc-xfer li { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 15px; }
+.rc-lines { border-bottom: 2px dashed var(--line); padding-bottom: 8px; }
+.rc-sum { display: flex; justify-content: space-between; align-items: center; margin: 12px 0 4px; }
+.rc-sum span { color: var(--muted); font-size: 13px; font-weight: 700; }
+.rc-sum b { background: var(--accent); color: #fff; padding: 3px 10px; border-radius: 99px; font-size: 13px; }
+.rc-xfer li b { color: var(--accent-ink); font-size: 17px; }
+.rc-note { margin: 10px 0 0; text-align: right; color: var(--muted); font-size: 11px; }
+.lp-sec { margin-top: 68px; }
+.lp-h { font-size: clamp(25px, 4vw, 34px); letter-spacing: -.8px; line-height: 1.25; margin: 0 0 20px; font-weight: 900; word-break: keep-all; }
+.lp-grid { display: grid; gap: 12px; }
+.lp-tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
+.lp-tile b { font-size: 18px; }
+.lp-tile p { margin: 8px 0 0; color: var(--muted); font-size: 15px; word-break: keep-all; }
+/* 탑승권 단계 */
+.lp-pass { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.lp-pass li { position: relative; display: flex; align-items: center; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 0 18px 18px; box-shadow: var(--shadow); overflow: hidden; }
+.lp-pass-no { flex: none; font-size: 30px; font-weight: 900; color: var(--accent); letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.lp-pass li > div { flex: 1; min-width: 0; }
+.lp-pass b { font-size: 18px; }
+.lp-pass p { margin: 4px 0 0; color: var(--muted); font-size: 15px; word-break: keep-all; }
+.lp-pass-stub { align-self: stretch; flex: none; width: 44px; display: grid; place-items: center; border-left: 2px dashed var(--line); background: var(--accent-soft);
+  color: var(--accent-ink); font-size: 11px; font-weight: 900; letter-spacing: 2px; writing-mode: vertical-rl; margin: -18px 0; }
+.lp-faq details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 18px; margin-top: 10px; }
+.lp-faq summary { padding: 14px 0; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.lp-faq summary::-webkit-details-marker { display: none; }
+.lp-faq summary::after { content: "+"; color: var(--accent); font-size: 22px; line-height: 1; font-weight: 900; }
+.lp-faq details[open] summary::after { content: "−"; }
+.lp-faq details p { margin: 0 0 16px; color: var(--muted); word-break: keep-all; }
+.lp-more { margin: 14px 0 0; font-weight: 700; }
+.lp-final { text-align: center; background: var(--accent); color: #fff; border-radius: 28px; padding: 40px 20px; }
+.lp-final-tag { margin: 0 0 6px; font-weight: 800; opacity: .9; }
+.lp-final .lp-h { color: #fff; }
+.lp-final .btn.primary { background: #fff; color: var(--accent-ink); box-shadow: none; }
+.lp-foot { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); text-align: center; color: var(--muted); font-size: 14px; }
+.lp-foot p { margin: 6px 0 0; } .lp-foot a { color: inherit; }
+@media (min-width: 780px) {
+  #landing { padding: 0 32px 50px; }
+  .lp-hero { grid-template-columns: 1.2fr .8fr; padding-top: 60px; }
+  .lp-grid.four { grid-template-columns: repeat(4, 1fr); }
+  .lp-grid.three { grid-template-columns: repeat(3, 1fr); }
+  .lp-pass { grid-template-columns: repeat(3, 1fr); }
+  .lp-faq { max-width: 780px; }
+}

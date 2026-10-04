@@ -2,7 +2,7 @@
   "name": "트립N빵 — 링크 하나로 여행 정산",
   "short_name": "트립N빵",
   "description": "링크로 같이 적고, 최소 송금으로 정산",
-  "start_url": "./",
+  "start_url": "./#/",
   "scope": "./",
   "display": "standalone",
   "background_color": "#FFF8EC",
