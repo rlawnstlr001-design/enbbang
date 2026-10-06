@@ -312,13 +312,18 @@ export class CloudStore {
     if (error) throw new Error(error.message);
     return path;
   }
+  // 영수증 주소: Edge Function `media`가 여행방을 확인하고 1시간짜리 서명 주소를 준다.
+  // (Storage 읽기를 공개 키에 열어 두면 버킷 목록 = 방 id가 밖에서 보여서 막았다 — 10/6)
   async receiptUrl(path) {
     const hit = this.#signed.get(path);
     if (hit && hit.exp > Date.now()) return hit.url;
-    const { data, error } = await this.#sb.storage.from('receipts').createSignedUrl(path, 3600);
-    if (error) throw new Error(error.message);
-    this.#signed.set(path, { url: data.signedUrl, exp: Date.now() + 50 * 60 * 1000 });
-    return data.signedUrl;
+    const { data, error } = await this.#sb.functions.invoke('media', {
+      body: { bucket: 'receipts', scope: path.split('/')[0], paths: [path] },
+    });
+    const url = data?.urls?.[path];
+    if (error || !url) throw new Error('영수증 사진을 불러오지 못했어요');
+    this.#signed.set(path, { url, exp: Date.now() + 50 * 60 * 1000 });
+    return url;
   }
   async claimParticipant(id, pid) {
     await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid });
