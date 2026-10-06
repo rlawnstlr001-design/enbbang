@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610060943';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610060943';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610060943';
+} from './settle.js?v=202610060950';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610060950';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610060950';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610060943';
+} from './share.js?v=202610060950';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610060943';
+} from './native.js?v=202610060950';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -94,7 +94,10 @@ addEventListener('enbbang:flushed', (e) => {
   else if (done) toast(`연결돼서 지출 ${done}건을 저장했어요`);
   refreshTrip();
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) store?.flush?.(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  Promise.resolve(store?.flush?.()).finally(() => refreshTrip());
+});
 
 function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?.name ?? '?'; }
 const isAdmin = (trip) => !!me.adminKey(trip.id);
@@ -528,8 +531,8 @@ function renderSettle(body, t, result) {
   body.querySelectorAll('[data-paylink]').forEach((a) => {
     a.addEventListener('click', () => store.logEvent(t.id, 'transfer_link', { kind: a.dataset.paylink }));
   });
-  body.querySelector('#share-text').onclick = () => {
-    copy(settlementText(t, result, (pid) => nameOf(t, pid)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
+  body.querySelector('#share-text').onclick = async () => {
+    copy(settlementText(t, result, (pid) => nameOf(t, pid), await tripLink(t)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
     store.logEvent(t.id, 'settle_shared', { via: 'text' });
   };
   body.querySelector('#share-img').onclick = async () => {
@@ -994,10 +997,11 @@ function expenseSheet(exp) {
       };
       if (c !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
       const submitBtn = f.querySelector('.btn.primary');
+      if (submitBtn.disabled) return; // 두 번 눌러 같은 지출이 두 번 들어가지 않게
+      submitBtn.disabled = true;
       let photoSkipped = false;
       try {
         if (st.photo) {
-          submitBtn.disabled = true;
           submitBtn.textContent = '사진 올리는 중…';
           try { data.receipt = await store.uploadReceipt(t.id, st.photo); }
           catch (err) {
@@ -1117,7 +1121,7 @@ function settingsSheet() {
       ${isApp ? `<label class="field"><span>"내일 알림" 시각</span><select class="input" id="alarm-hour">${hours}</select></label>` : ''}
       <div class="card about small">
         <div class="row between"><span class="muted">버전</span><b>${esc(window.APP_VERSION || '웹')}</b></div>
-        <div class="row between"><a href="privacy.html">개인정보처리방침</a><a href="mailto:enbbanghaza@gmail.com?subject=${encodeURIComponent('트립N빵 문의')}">문의하기</a></div>
+        <div class="row between"><a href="support.html">도움말</a><a href="privacy.html">개인정보처리방침</a><a href="mailto:enbbanghaza@gmail.com?subject=${encodeURIComponent('트립N빵 문의')}">문의하기</a></div>
       </div>
       <button type="button" class="btn block" id="set-close">닫기</button>
     </div>`, (el) => {
@@ -1151,7 +1155,10 @@ async function tripLink(t) {
 
 async function shareTrip(t) {
   const url = await tripLink(t);
-  const text = `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵)`;
+  const inviter = t.participants.find((p) => p.id === me.get(t.id))?.name;
+  const text = inviter
+    ? `✈️ ${inviter}님이 '${t.name}' 정산방에 초대했어요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵)`
+    : `✈️ ${t.name} 정산방이에요. 이름만 고르고 쓴 돈 같이 적어요 (트립N빵)`;
   store.logEvent(t.id, 'invite_shared', { via: navigator.share ? 'share' : 'copy' });
   sessionStorage.removeItem(`fresh:${t.id}`);
   if (await nativeShare({ title: t.name, text, url })) return;

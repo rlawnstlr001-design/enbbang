@@ -5,6 +5,15 @@ export const RATE_ATTRIBUTION = { text: 'Rates By Exchange Rate API', href: 'htt
 
 const memo = new Map();
 
+// 기기에 저장된 같은 기준통화 환율표 중 가장 최근 것 (오프라인 둘째 날에도 자동 입력이 되게)
+function latestCached(base) {
+  try {
+    const prefix = `enbbang:rates:${base}:`;
+    const keys = Object.keys(localStorage).filter((k) => k.startsWith(prefix)).sort();
+    return keys.length ? JSON.parse(localStorage.getItem(keys.at(-1))) : null;
+  } catch { return null; }
+}
+
 // 반환: 외화 1단위 = 기준통화 몇 (예: getRate('JPY','KRW') → 9.12)
 export async function getRate(cur, base) {
   if (cur === base) return { rate: 1, date: null };
@@ -22,8 +31,9 @@ export async function getRate(cur, base) {
       table = { rates: j.rates, date: (j.time_last_update_utc || '').slice(5, 16) };
       try { localStorage.setItem(key, JSON.stringify(table)); } catch { /* 저장 실패 무시 */ }
     } catch (e) {
-      console.warn('환율 조회 실패', e);
-      return null;
+      console.warn('환율 조회 실패 — 기기에 남은 최근 환율로', e);
+      table = latestCached(base);
+      if (!table) return null;
     }
   }
   memo.set(key, table);
