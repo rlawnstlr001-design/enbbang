@@ -308,3 +308,11 @@ html.landing #app, html.landing #netbar { display: none !important; }
   .lp-faq { max-width: 780px; }
 }
 .pay-changed { color: var(--minus); font-weight: 700; margin: 4px 0 0; width: 100%; }
+/* 카드 명세서로 맞추기 */
+.stmt-card { margin-bottom: 12px; border: 2px dashed var(--accent); }
+.stmt-card.done { border-style: solid; border-color: var(--line); }
+.stmt-card p { margin: 6px 0 10px; }
+.stmt-row { display: grid; grid-template-columns: 1fr 9.5em; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.stmt-row.locked { opacity: .6; }
+.stmt-what { min-width: 0; } .stmt-what b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stmt-what small { color: var(--muted); }

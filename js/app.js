@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610060950';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610060950';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610060950';
+} from './settle.js?v=202610061650';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610061650';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610061650';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610060950';
+} from './share.js?v=202610061650';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610060950';
+} from './native.js?v=202610061650';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -98,6 +98,13 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   Promise.resolve(store?.flush?.()).finally(() => refreshTrip());
 });
+
+// 환율 입력 단위 — 엔은 10엔, 동·루피아·원은 1,000 기준으로 받는다 (사용자 결정 10/6: "10엔 = 91원").
+// 저장은 늘 1단위 환율이라 정산 계산·서버는 그대로다.
+const RATE_UNIT = { JPY: 10, VND: 1000, IDR: 1000, KRW: 1000 };
+const rateUnit = (c) => RATE_UNIT[c] || 1;
+// 화면에 보이는 환율: 1 이상이면 소수 둘째 자리까지, 작으면 유효숫자 4자리
+const tidy = (x) => (Number(x) >= 1 ? Math.round(Number(x) * 100) / 100 : Number(Number(x).toPrecision(4)));
 
 function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?.name ?? '?'; }
 const isAdmin = (trip) => !!me.adminKey(trip.id);
@@ -441,6 +448,7 @@ function renderSettle(body, t, result) {
     </div>
     <p class="muted small mode-note">${modeNote}</p>
     ${allDone ? `<div class="card celebrate"><b>🎉 정산 끝!</b><p class="small">모든 송금이 완료됐어요.</p></div>` : ''}
+    ${statementCard(t)}
     <div class="card">
       <div class="row between"><b>${pending.length ? `보낼 돈 ${pending.length}건` : '보낼 돈 없음'}</b>
         ${done.length ? `<span class="muted small">완료 ${done.length}건</span>` : ''}</div>
@@ -531,6 +539,7 @@ function renderSettle(body, t, result) {
   body.querySelectorAll('[data-paylink]').forEach((a) => {
     a.addEventListener('click', () => store.logEvent(t.id, 'transfer_link', { kind: a.dataset.paylink }));
   });
+  body.querySelector('#stmt-open')?.addEventListener('click', () => statementSheet(t));
   body.querySelector('#share-text').onclick = async () => {
     copy(settlementText(t, result, (pid) => nameOf(t, pid), await tripLink(t)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
     store.logEvent(t.id, 'settle_shared', { via: 'text' });
@@ -691,6 +700,67 @@ function payInfoSheet(p) {
   });
 }
 
+// ───────── 카드 명세서로 맞추기 ─────────
+// 외화 지출을 실제 카드 청구액(정산 통화)으로 한 화면에서 맞춘다 — 해외여행 정산의 마지막 단계
+const foreignExpenses = (t) => t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && e.currency !== t.baseCurrency);
+function statementCard(t) {
+  const fx = foreignExpenses(t);
+  if (!fx.length) return '';
+  const matched = fx.filter((e) => e.baseOverride != null).length;
+  const all = matched === fx.length;
+  return `<div class="card stmt-card ${all ? 'done' : ''}">
+    <div class="row between"><b>💳 카드 명세서로 맞추기</b><span class="badge">${matched}/${fx.length}건 맞춤</span></div>
+    <p class="muted small">${all ? '외화 지출을 모두 실제 청구액으로 맞췄어요.' : `외화로 쓴 지출을 카드 명세서의 실제 청구액(${t.baseCurrency})으로 맞추면 정산이 정확해져요.`}</p>
+    <button class="btn block" id="stmt-open">${all ? '다시 보기' : matched ? '이어서 맞추기' : '청구액 넣기'}</button>
+  </div>`;
+}
+function statementSheet(t) {
+  const fx = foreignExpenses(t);
+  const cur = t.baseCurrency;
+  const editable = (e) => e.mine || e.device === deviceId() || isAdmin(t);
+  openSheet(`
+    <h2>카드 명세서로 맞추기</h2>
+    <p class="muted small">명세서에 찍힌 ${cur} 금액을 넣어 주세요. 비워 두면 환율로 계산해요.</p>
+    <form id="stmt" class="stack">
+      ${fx.map((e) => {
+        let est;
+        try { est = fmt(expenseBaseMinor({ ...e, baseOverride: null }, cur), cur); } catch { est = '환율 없음'; }
+        const ok = editable(e);
+        return `<label class="stmt-row ${ok ? '' : 'locked'}">
+          <span class="stmt-what"><b>${ok ? '' : '🔒 '}${esc(e.title || '지출')}</b>
+            <small>${esc(e.date.slice(5).replace('-', '/'))} · ${fmtMajor(e.amount, e.currency)} · 환율로 ≈ ${est}</small></span>
+          <input class="input num" inputmode="decimal" name="${esc(e.id)}" placeholder="청구액" ${ok ? '' : 'disabled'}
+            value="${e.baseOverride != null ? Number(e.baseOverride).toLocaleString('ko-KR') : ''}" aria-label="${esc(e.title || '지출')} 청구액"></label>`;
+      }).join('')}
+      ${fx.some((e) => !editable(e)) ? '<p class="muted small">🔒 표시된 지출은 입력한 사람이나 총무만 바꿀 수 있어요</p>' : ''}
+      <div class="row"><button type="button" class="btn grow" id="stmt-cancel">취소</button><button class="btn primary grow">저장</button></div>
+    </form>`, (el) => {
+    el.querySelector('#stmt-cancel').onclick = closeSheet;
+    el.querySelector('#stmt').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const form = ev.target;
+      const btn = form.querySelector('.btn.primary');
+      if (btn.disabled) return;
+      const changes = [];
+      for (const e of fx.filter(editable)) {
+        const v = form.elements[e.id].value.trim();
+        const next = v ? parseAmount(v) : null;
+        if (v && !(next > 0)) return toast(`'${e.title || '지출'}' 금액을 숫자로 넣어 주세요`);
+        if (next == null && !e.rate) return toast(`'${e.title || '지출'}'은 환율이 없어서 청구액을 비울 수 없어요`);
+        if ((next ?? null) !== (e.baseOverride ?? null)) changes.push({ e, next });
+      }
+      if (!changes.length) { closeSheet(); return toast('바뀐 게 없어요'); }
+      btn.disabled = true;
+      try {
+        for (const c of changes) await store.updateExpense(t.id, c.e.id, { baseOverride: c.next });
+        view.trip = await store.getTrip(t.id);
+        closeSheet(); renderTrip();
+        toast(`${changes.length}건을 실제 청구액으로 맞췄어요`);
+      } catch (err) { btn.disabled = false; report(err); }
+    };
+  });
+}
+
 // 송금 정보가 48시간 안에 바뀌었는지 (바꿔치기를 다른 사람이 알아챌 수 있게)
 function payChangedRecently(t, pid) {
   const at = t.participants.find((p) => p.id === pid)?.payChangedAt;
@@ -754,7 +824,7 @@ function expenseSheet(exp) {
       </div>
       <div id="fx" class="fx ${e.currency === t.baseCurrency ? 'hidden' : ''}">
         <label class="fx-row"><span id="rate-label">환율</span>
-          <input class="input num fx-rate" name="rate" inputmode="decimal" value="${esc(e.rate)}"><span class="muted">${t.baseCurrency}</span></label>
+          <input class="input num fx-rate" name="rate" inputmode="decimal" value="${esc(e.rate ? tidy(e.rate * rateUnit(e.currency)) : '')}"><span class="muted">${t.baseCurrency}</span></label>
         <details ${e.baseOverride != null && e.baseOverride !== '' ? 'open' : ''}><summary class="small">실제 카드 청구액으로 맞추기</summary>
           <label class="fx-row"><span>청구액</span><input class="input num" name="baseOverride" inputmode="decimal" value="${esc(e.baseOverride ?? '')}" placeholder="넣으면 환율보다 우선"><span class="muted">${t.baseCurrency}</span></label>
         </details>
@@ -932,15 +1002,16 @@ function expenseSheet(exp) {
 
     const updateFx = async () => {
       fx.classList.toggle('hidden', cur() === t.baseCurrency);
-      el.querySelector('#rate-label').textContent = `1 ${cur()} =`;
+      el.querySelector('#rate-label').textContent = `${rateUnit(cur()).toLocaleString('ko-KR')} ${cur()} =`;
       if (cur() === t.baseCurrency) return;
       const note = el.querySelector('#fx-note');
       if (!f.rate.value || f.dataset.autoRateFor !== cur()) {
         note.textContent = '환율 불러오는 중…';
         const r = await getRate(cur(), t.baseCurrency);
         if (r) {
-          if (!editing || f.dataset.autoRateFor) f.rate.value = r.rate;
+          if (!editing || f.dataset.autoRateFor) f.rate.value = tidy(r.rate * rateUnit(cur()));
           f.dataset.autoRateFor = cur();
+          f.dataset.refRate = r.rate; // 단위 실수 경고용 (1단위 기준)
           note.innerHTML = `${esc(r.date)} 참고 환율이에요. 카드 청구액과 다를 수 있어요 · <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${RATE_ATTRIBUTION.text}</a>`;
         } else note.textContent = '환율을 못 불러왔어요. 직접 입력해 주세요.';
       }
@@ -991,11 +1062,20 @@ function expenseSheet(exp) {
       const c = cur();
       const data = {
         title: f.title.value.trim(), date: f.date.value || today(), amount, currency: c,
-        rate: c === t.baseCurrency ? null : parseAmount(f.rate.value) || null,
+        // 고칠 때 환율 칸을 안 건드렸으면 원래 값 그대로 (화면은 반올림해 보여 주므로)
+        rate: c === t.baseCurrency ? null
+          : editing && c === e.currency && e.rate && f.rate.value === String(tidy(e.rate * rateUnit(c))) ? e.rate
+          : (parseAmount(f.rate.value) / rateUnit(c)) || null,
         baseOverride: c === t.baseCurrency || !f.baseOverride.value.trim() ? null : parseAmount(f.baseOverride.value),
         payerId: st.payerId, shares, category: st.cat,
       };
       if (c !== t.baseCurrency && !data.rate && data.baseOverride == null) return toast('환율이나 카드 청구액을 넣어 주세요');
+      // 단위 실수(1엔·100엔 기준 숫자를 넣음) 막기: 참고 환율과 3배 넘게 다르면 한 번 묻는다
+      const ref = Number(f.dataset.refRate);
+      if (data.rate && ref && (data.rate / ref > 3 || ref / data.rate > 3)) {
+        const u = rateUnit(c).toLocaleString('ko-KR');
+        if (!confirm(`환율이 참고 환율(${u} ${c} = ${fmtMajor(ref * rateUnit(c), t.baseCurrency)})과 크게 달라요.\n${u} ${c} 기준 금액이 맞나요? 그대로 저장할까요?`)) return;
+      }
       const submitBtn = f.querySelector('.btn.primary');
       if (submitBtn.disabled) return; // 두 번 눌러 같은 지출이 두 번 들어가지 않게
       submitBtn.disabled = true;
