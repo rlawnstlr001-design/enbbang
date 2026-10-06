@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610061956';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610061956';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610061956';
+} from './settle.js?v=202610070811';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610070811';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610070811';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610061956';
+} from './share.js?v=202610070811';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610061956';
+} from './native.js?v=202610070811';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -1345,7 +1345,7 @@ function settingsSheet() {
       ${isApp ? `<label class="field"><span>"내일 알림" 시각</span><select class="input" id="alarm-hour">${hours}</select></label>` : ''}
       <div class="card about small">
         <div class="row between"><span class="muted">버전</span><b>${esc(window.APP_VERSION || '웹')}</b></div>
-        <div class="row between"><a href="support.html">도움말</a><a href="privacy.html">개인정보처리방침</a><a href="mailto:enbbanghaza@gmail.com?subject=${encodeURIComponent('트립N빵 문의')}">문의하기</a></div>
+        <div class="row between"><a href="support.html">도움말</a><a href="privacy.html">개인정보처리방침</a><a href="mailto:sosolab100@gmail.com?subject=${encodeURIComponent('트립N빵 문의')}">문의하기</a></div>
       </div>
       <button type="button" class="btn block" id="set-close">닫기</button>
     </div>`, (el) => {
