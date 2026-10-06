@@ -13,16 +13,16 @@
   <meta property="og:description" content="링크로 같이 적고, 누가 누구에게 얼마 보낼지 최소 송금으로 정리해 드려요.">
   <meta property="og:image" content="https://tripnbbang.com/og.png">
   <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="600">
+  <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="#FF7A1A">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23FF7A1A'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='800'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=202610061925">
+  <link rel="stylesheet" href="styles.css?v=202610061956">
   <!-- Supabase 클라이언트(package-lock 버전 고정, UMD → window.supabase). CDN 최신판을 받지 않아 갑자기 깨지거나 해외 약한 망에서 멈추지 않게 -->
-  <script src="js/supabase.js?v=202610061925"></script>
-  <script src="config.js?v=202610061925"></script>
+  <script src="js/supabase.js?v=202610061956"></script>
+  <script src="config.js?v=202610061956"></script>
   <script>
     // 소개 페이지는 웹에서 주소만 열었을 때만(#how 같은 쪽 안 이동 포함). 앱 안이거나 #/… 링크면 바로 앱 화면 (깜빡임 방지)
     if (location.hash.startsWith('#/') || window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.remove('landing');
@@ -201,6 +201,6 @@
   <div id="app" aria-live="polite"><div class="boot">불러오는 중…</div></div>
   <div id="sheet-root"></div>
   <div id="toast" role="status"></div>
-  <script type="module" src="js/app.js?v=202610061925"></script>
+  <script type="module" src="js/app.js?v=202610061956"></script>
 </body>
 </html>
