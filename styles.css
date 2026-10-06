@@ -307,3 +307,4 @@ html.landing #app, html.landing #netbar { display: none !important; }
   .lp-pass { grid-template-columns: repeat(3, 1fr); }
   .lp-faq { max-width: 780px; }
 }
+.pay-changed { color: var(--minus); font-weight: 700; margin: 4px 0 0; width: 100%; }

@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610060938';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610060938';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610060938';
+} from './settle.js?v=202610060943';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610060943';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610060943';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610060938';
+} from './share.js?v=202610060943';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610060938';
+} from './native.js?v=202610060943';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -427,6 +427,7 @@ function renderSettle(body, t, result) {
                : `<button class="btn sm ghost" data-copy-acc="${i}:${j}">${l.label}</button>`).join('')}`}
       </div>
       ${!x.done && !links.length ? `<p class="muted small hint">${esc(nameOf(t, x.to))}님이 멤버 탭에 송금 정보를 넣으면 송금 버튼이 생겨요</p>` : ''}
+      ${!x.done && links.length && payChangedRecently(t, x.to) ? `<p class="small hint pay-changed">⚠️ ${esc(nameOf(t, x.to))}님 송금 정보가 최근 바뀌었어요. 보내기 전에 확인해 주세요</p>` : ''}
     </div>`;
   };
 
@@ -687,6 +688,12 @@ function payInfoSheet(p) {
   });
 }
 
+// 송금 정보가 48시간 안에 바뀌었는지 (바꿔치기를 다른 사람이 알아챌 수 있게)
+function payChangedRecently(t, pid) {
+  const at = t.participants.find((p) => p.id === pid)?.payChangedAt;
+  return !!at && Date.now() - Date.parse(at) < 48 * 3600 * 1000;
+}
+
 // 받침 있으면 '이', 없으면 '가' (한글이 아니면 '이(가)')
 function iGa(name) {
   const c = String(name).charCodeAt(String(name).length - 1);
@@ -705,7 +712,7 @@ function expenseSheet(exp) {
   const t = view.trip;
   const myId = me.get(t.id);
   const editing = !!exp;
-  const canEdit = !editing || exp.device === deviceId() || isAdmin(t);
+  const canEdit = !editing || exp.mine || exp.device === deviceId() || isAdmin(t); // mine: 서버, device: 로컬 모드·저장 대기
   const e = exp || {
     title: '', date: today(), amount: '', currency: lastCurrency(t), rate: '', baseOverride: '',
     payerId: myId || t.participants[0].id,

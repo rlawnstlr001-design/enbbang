@@ -211,7 +211,8 @@ export class CloudStore {
     let t;
     try {
       await this.flush();
-      t = await this.#rpc('enb_get_trip', { p_trip: id });
+      // p_device: 서버가 "내 지출인지(mine)"만 알려 준다 — 남의 기기 값은 받지 않는다 (007)
+      t = await this.#rpc('enb_get_trip', { p_trip: id, p_device: deviceId() });
     } catch (e) {
       const cached = isNetError(e) && LS.get(`enbbang:cache:${id}`);
       if (!cached) throw e;
@@ -227,8 +228,11 @@ export class CloudStore {
     this.#ping(id);
     return p;
   }
+  // 이름·송금 정보는 그 참여자를 고른 기기나 총무만 바꿀 수 있다 (서버가 확인, 007)
   async updateParticipant(id, pid, patch) {
-    await this.#rpc('enb_update_participant', { p_trip: id, p_pid: pid, p_patch: patch });
+    await this.#rpc('enb_update_participant', {
+      p_trip: id, p_pid: pid, p_patch: patch, p_device: deviceId(), p_admin: me.adminKey(id) || '',
+    });
     this.#ping(id);
   }
   async addExpense(id, exp) {
@@ -326,7 +330,7 @@ export class CloudStore {
     return url;
   }
   async claimParticipant(id, pid) {
-    await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid });
+    await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid, p_device: deviceId() });
     this.#ping(id);
   }
   async setSettleMode(id, mode) {
