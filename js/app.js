@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610061724';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610061724';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610061724';
+} from './settle.js?v=202610061925';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610061925';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610061925';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610061724';
+} from './share.js?v=202610061925';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610061724';
+} from './native.js?v=202610061925';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -144,6 +144,61 @@ function renderLanding() {
       st.ios && `<a class="btn" href="${esc(st.ios)}" rel="noopener">App Store에서 받기</a>`].filter(Boolean).join('');
     $s.classList.add('has-links');
   }
+  initLandingCalc();
+}
+
+// 첫 화면 계산기 — 예시 지출(엔화) 켜고 끄기 + 직접 더하기 + 인원 → 1인당 원화. 환율은 앱과 같은 참고 환율(실패하면 예시 값)
+const LP_FALLBACK = { KRW: 1, JPY: 9.1, USD: 1390, EUR: 1610, TWD: 43, VND: 0.054, THB: 39, PHP: 24, CNY: 192, HKD: 178, SGD: 1070, GBP: 1850, AUD: 900 };
+let lpCalcBound = false;
+// 환율 날짜 "06 Oct 2026" → "10/6"
+const lpDate = (s) => { const d = new Date(s); return isNaN(d) ? s : `${d.getMonth() + 1}/${d.getDate()}`; };
+function initLandingCalc() {
+  const $f = document.getElementById('lp-calc');
+  if (!$f || lpCalcBound) return;
+  lpCalcBound = true;
+  const st = { people: 4, live: {}, date: null };
+  const $extra = $f.querySelector('#lp-extra');
+  const $cur = $f.querySelector('#lp-cur');
+  const won = (n) => Math.round(n).toLocaleString('ko-KR');
+  const rateOf = (c) => st.live[c] ?? LP_FALLBACK[c] ?? 1;
+  const draw = () => {
+    let total = 0;
+    $f.querySelectorAll('.lp-item input').forEach((cb) => {
+      cb.closest('.lp-item').classList.toggle('off', !cb.checked);
+      if (cb.checked) total += Number(cb.dataset.yen) * rateOf('JPY');
+    });
+    const cur = $cur.value;
+    total += (Number($extra.value.replace(/[^0-9]/g, '')) || 0) * rateOf(cur);
+    $f.querySelector('#lp-total').textContent = won(Math.round(total / 10) * 10);
+    $f.querySelector('#lp-per').textContent = won(Math.round(total / st.people / 10) * 10);
+    $f.querySelector('#lp-people').textContent = `${st.people}명`;
+    $f.querySelector('#lp-dec').disabled = st.people <= 2;
+    $f.querySelector('#lp-inc').disabled = st.people >= 20;
+    const c = cur === 'KRW' ? 'JPY' : cur;
+    const unit = rateUnit(c);
+    const live = st.live[c] != null;
+    $f.querySelector('#lp-rate').innerHTML = `${live ? '참고 환율' : '예시 환율'} ${unit.toLocaleString('ko-KR')} ${c} = ${won(rateOf(c) * unit)}원`
+      + (live && st.date ? ` (${esc(lpDate(st.date))} 기준)` : '')
+      + ' · 여행방에서는 참고 환율이 자동으로 채워지고, 카드에 찍힌 원화로 고칠 수 있어요.'
+      + (live ? ` <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${esc(RATE_ATTRIBUTION.text)}</a>` : '');
+  };
+  const fetchRate = async (c) => {
+    if (c === 'KRW' || st.live[c] != null) return;
+    const r = await getRate(c, 'KRW').catch(() => null);
+    if (r?.rate) { st.live[c] = r.rate; st.date = r.date || st.date; draw(); }
+  };
+  $f.addEventListener('submit', (e) => e.preventDefault());
+  $f.addEventListener('change', draw);
+  $extra.addEventListener('input', () => {
+    const n = $extra.value.replace(/[^0-9]/g, '').slice(0, 9);
+    $extra.value = n ? Number(n).toLocaleString('ko-KR') : '';
+    draw();
+  });
+  $cur.addEventListener('change', () => fetchRate($cur.value));
+  $f.querySelector('#lp-dec').addEventListener('click', () => { st.people = Math.max(2, st.people - 1); draw(); });
+  $f.querySelector('#lp-inc').addEventListener('click', () => { st.people = Math.min(20, st.people + 1); draw(); });
+  draw();
+  fetchRate('JPY');
 }
 
 // ───────── 홈 ─────────
