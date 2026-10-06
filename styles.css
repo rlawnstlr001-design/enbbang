@@ -316,3 +316,8 @@ html.landing #app, html.landing #netbar { display: none !important; }
 .stmt-row.locked { opacity: .6; }
 .stmt-what { min-width: 0; } .stmt-what b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stmt-what small { color: var(--muted); }
+/* 참여자 정리 */
+.tidy-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.tidy-row b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tidy-merge { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.tidy-merge p { margin: 0 0 8px; }

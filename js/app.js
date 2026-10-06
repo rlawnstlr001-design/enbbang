@@ -1,16 +1,16 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610061650';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610061650';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610061650';
+} from './settle.js?v=202610061721';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610061721';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610061721';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610061650';
+} from './share.js?v=202610061721';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610061650';
+} from './native.js?v=202610061721';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -121,6 +121,7 @@ async function route() {
   if (landing) return renderLanding();
   if (wasLanding) scrollTo(0, 0);
   let m;
+  if ((m = h.match(/^\/t\/([\w-]+)\/mv\/([\w-]+)$/))) return importMove(m[1], m[2]);
   if ((m = h.match(/^\/t\/([\w-]+)(?:\/(\w+))?/))) return openTrip(m[1], m[2] || 'list');
   if ((m = h.match(/^\/s\/(.+)$/))) return importSnapshot(m[1]);
   renderHome();
@@ -605,7 +606,9 @@ function renderPeople(body, t) {
         <input class="input grow" name="n" maxlength="30" placeholder="사람 추가">
         <button class="btn">추가</button></form>
     </div>
-    <button class="btn ghost block" id="whoami" style="margin-top:12px">내가 누구인지 다시 고르기</button>`;
+    <button class="btn ghost block" id="whoami" style="margin-top:12px">내가 누구인지 다시 고르기</button>
+    ${store.mode === 'cloud' && myId ? '<button class="btn ghost block" id="move-dev">📱 다른 기기에서 이어서 쓰기</button>' : ''}
+    ${store.mode === 'cloud' && isAdmin(t) ? '<button class="btn ghost block" id="tidy">🧹 참여자 정리 (이름·합치기·빼기)</button>' : ''}`;
   body.querySelector('[data-payinfo]')?.addEventListener('click', () => payInfoSheet(t.participants.find((p) => p.id === myId)));
   const patch = async (pid, data) => {
     try { await store.updateParticipant(t.id, pid, data); await refreshTrip(); } catch (err) { report(err); }
@@ -634,6 +637,8 @@ function renderPeople(body, t) {
     catch (err) { report(err); }
   };
   body.querySelector('#whoami').onclick = () => pickIdentity();
+  body.querySelector('#move-dev')?.addEventListener('click', () => moveSheet(t));
+  body.querySelector('#tidy')?.addEventListener('click', () => tidySheet(t));
 }
 
 // ───────── 시트 ─────────
@@ -670,6 +675,8 @@ function pickIdentity() {
       if (!n) return;
       const exist = t.participants.find((p) => p.name === n);
       if (exist) return done(exist.id);
+      const similar = t.participants.find((p) => p.name.includes(n) || n.includes(p.name));
+      if (similar && !confirm(`'${similar.name}'님이 이미 있어요. 같은 분이면 '취소'를 누르고 이름을 골라 주세요.\n'${n}'(으)로 새로 참여할까요?`)) return;
       try { const p = await store.addParticipant(t.id, n); view.trip = await store.getTrip(t.id); done(p.id); }
       catch (err) { report(err); }
     };
@@ -697,6 +704,88 @@ function payInfoSheet(p) {
       try { await store.updateParticipant(view.trip.id, p.id, { payInfo }); view.trip = await store.getTrip(view.trip.id); closeSheet(); renderTrip(); }
       catch (err) { report(err); }
     };
+  });
+}
+
+// ───────── 다른 기기에서 이어서 쓰기 ─────────
+// 웹(카톡 안 브라우저)에서 쓰다가 앱을 깔면 저장소가 달라 '나'·총무 권한이 사라진다 → 옮기기 링크로 넘긴다
+const b64u = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
+async function moveSheet(t) {
+  const code = b64u(JSON.stringify({ m: me.get(t.id), d: deviceId(), a: me.adminKey(t.id) || undefined }));
+  const url = (await tripLink(t)).replace(/#\/t\/[\w-]+$/, `#/t/${t.id}/mv/${code}`);
+  openSheet(`
+    <h2>다른 기기에서 이어서 쓰기</h2>
+    <p class="muted">앱을 새로 깔았거나 다른 폰·PC에서 이 방을 쓸 때, 아래 링크를 <b>그 기기에서</b> 열면 내 이름·내 지출${isAdmin(t) ? '·총무 권한' : ''}이 그대로 넘어가요.</p>
+    <p class="small pay-changed">⚠️ 이 링크를 받은 사람은 나처럼 쓸 수 있어요. 단톡방에 올리지 말고 나에게만 보내 주세요.</p>
+    <div class="row"><button type="button" class="btn grow" id="mv-cancel">닫기</button><button type="button" class="btn primary grow" id="mv-copy">링크 복사</button></div>`, (el) => {
+    el.querySelector('#mv-cancel').onclick = closeSheet;
+    el.querySelector('#mv-copy').onclick = () => { copy(url, '옮기기 링크를 복사했어요. 새 기기에서 열어 주세요'); closeSheet(); };
+  });
+}
+async function importMove(id, code) {
+  let data;
+  try { data = JSON.parse(unb64u(code)); } catch { data = null; }
+  if (!data?.m) { replaceHash(`#/t/${id}`); return toast('옮기기 링크가 올바르지 않아요'); }
+  me.set(id, data.m);
+  if (data.a) me.setAdminKey(id, data.a);
+  try { await store.moveDevice(id, data.d); } catch { /* 이름·총무 키는 옮겨졌다 */ }
+  replaceHash(`#/t/${id}`);
+  toast('이 기기로 옮겼어요');
+}
+
+// ───────── 참여자 정리 (총무) ─────────
+function tidySheet(t) {
+  const used = (pid) => t.expenses.some((e) => e.payerId === pid || e.shares.some((s) => s.pid === pid));
+  openSheet(`
+    <h2>참여자 정리</h2>
+    <p class="muted small">같은 사람이 두 번 들어왔으면 <b>합치기</b>, 잘못 넣은 사람은 <b>빼기</b>(지출이 없을 때만).</p>
+    <div class="stack">${t.participants.map((p) => `
+      <div class="tidy-row">
+        <b>${esc(p.name)}</b>
+        <span class="row">
+          <button type="button" class="btn sm ghost" data-rn="${esc(p.id)}">이름</button>
+          ${t.participants.length > 1 ? `<button type="button" class="btn sm ghost" data-mg="${esc(p.id)}">합치기</button>` : ''}
+          ${!used(p.id) && t.participants.length > 1 ? `<button type="button" class="btn sm ghost" data-rm="${esc(p.id)}">빼기</button>` : ''}
+        </span>
+      </div>`).join('')}</div>
+    <button type="button" class="btn block" id="tidy-close" style="margin-top:14px">닫기</button>`, (el) => {
+    const after = async (msg) => { view.trip = await store.getTrip(t.id); closeSheet(); renderTrip(); toast(msg); };
+    el.querySelector('#tidy-close').onclick = closeSheet;
+    el.querySelectorAll('[data-rn]').forEach((b) => {
+      b.onclick = async () => {
+        const p = t.participants.find((x) => x.id === b.dataset.rn);
+        const n = prompt('새 이름', p.name)?.trim();
+        if (!n || n === p.name) return;
+        if (t.participants.some((x) => x.name === n)) return toast('같은 이름이 이미 있어요');
+        try { await store.updateParticipant(t.id, p.id, { name: n.slice(0, 30) }); await after('이름을 바꿨어요'); } catch (err) { report(err); }
+      };
+    });
+    el.querySelectorAll('[data-rm]').forEach((b) => {
+      b.onclick = async () => {
+        const p = t.participants.find((x) => x.id === b.dataset.rm);
+        if (!confirm(`${p.name}님을 이 방에서 뺄까요?`)) return;
+        try { await store.removeParticipant(t.id, p.id); await after(`${p.name}님을 뺐어요`); } catch (err) { report(err); }
+      };
+    });
+    el.querySelectorAll('[data-mg]').forEach((b) => {
+      b.onclick = () => {
+        const from = t.participants.find((x) => x.id === b.dataset.mg);
+        const box = document.createElement('div');
+        box.className = 'tidy-merge';
+        box.innerHTML = `<p class="small"><b>${esc(from.name)}</b>님은 누구와 같은 사람인가요? (지출·몫·송금이 옮겨지고 ${esc(from.name)}은 없어져요)</p>
+          <div class="chips">${t.participants.filter((x) => x.id !== from.id).map((x) => `<button type="button" class="chip" data-into="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>`;
+        el.querySelector('.tidy-merge')?.remove();
+        b.closest('.tidy-row').after(box);
+        box.querySelectorAll('[data-into]').forEach((c) => {
+          c.onclick = async () => {
+            const into = t.participants.find((x) => x.id === c.dataset.into);
+            if (!confirm(`${from.name} → ${into.name} 으로 합칠까요? 되돌릴 수 없어요.`)) return;
+            try { await store.mergeParticipants(t.id, from.id, into.id); await after(`${from.name}님을 ${into.name}님으로 합쳤어요`); } catch (err) { report(err); }
+          };
+        });
+      };
+    });
   });
 }
 

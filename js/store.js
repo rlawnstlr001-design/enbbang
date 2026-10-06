@@ -329,6 +329,22 @@ export class CloudStore {
     this.#signed.set(path, { url, exp: Date.now() + 50 * 60 * 1000 });
     return url;
   }
+  // 다른 기기에서 이어서 쓰기: 옛 기기의 '주인' 표시를 이 기기로 (008)
+  async moveDevice(id, oldDevice) {
+    if (!oldDevice || oldDevice === deviceId()) return 0;
+    const n = await this.#rpc('enb_move_device', { p_trip: id, p_old: oldDevice, p_new: deviceId() });
+    this.#ping(id);
+    return n;
+  }
+  // 참여자 정리 (총무만, 008)
+  async mergeParticipants(id, from, into) {
+    await this.#rpc('enb_merge_participants', { p_trip: id, p_from: from, p_into: into, p_admin: me.adminKey(id) || '' });
+    this.#ping(id);
+  }
+  async removeParticipant(id, pid) {
+    await this.#rpc('enb_remove_participant', { p_trip: id, p_pid: pid, p_admin: me.adminKey(id) || '' });
+    this.#ping(id);
+  }
   async claimParticipant(id, pid) {
     await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid, p_device: deviceId() });
     this.#ping(id);
