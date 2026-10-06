@@ -321,3 +321,17 @@ html.landing #app, html.landing #netbar { display: none !important; }
 .tidy-row b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tidy-merge { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
 .tidy-merge p { margin: 0 0 8px; }
+
+/* ── 접근성 (10/6 점검): 흰 글씨가 올라가는 주황은 진하게(5.2:1), 다크 모드는 밝은 주황 위에 진한 글씨 ── */
+:root { --accent-strong: #C2410C; --on-accent: #FFFFFF; --on-plus: #FFFFFF; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent-strong: #FF8A33; --on-accent: #1F1A14; --on-plus: #0B2018; } }
+:root[data-theme="dark"] { --accent-strong: #FF8A33; --on-accent: #1F1A14; --on-plus: #0B2018; }
+.btn.primary, .fab, .lp-top-link, .lp-cta .btn.primary { background: var(--accent-strong); color: var(--on-accent); }
+.chip[aria-pressed="true"] { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+.btn.send { color: var(--on-plus); }
+.lp-hero h1 em { color: var(--accent-strong); }
+/* 작은 버튼도 손가락 크기만큼 누를 수 있게 (보이는 크기는 그대로) */
+.member-chip button, .rc-x { position: relative; }
+.member-chip button::after, .rc-x::after { content: ""; position: absolute; inset: -9px; }
+.step.sm, .chip.sm, .link-btn { min-height: 44px; }
+.lp-final { background: var(--accent-strong); color: var(--on-accent); } .lp-final .lp-h { color: var(--on-accent); }
