@@ -80,6 +80,14 @@ export function setSetting(key, value) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* 저장 불가 */ }
   if (key === 'theme') applyTheme();
 }
+// 별점 요청(Play 인앱 리뷰) — 미리 묻지 않고 바로 띄운다(구글 정책). 한 기기에 한 번만. 스토어 설치본에서만 실제로 뜬다 (10/7)
+const Review = plug('InAppReview');
+export async function askReview(key) {
+  if (!isApp || !Review) return false;
+  try { if (localStorage.getItem(key)) return false; localStorage.setItem(key, String(Date.now())); } catch { return false; }
+  try { await Review.requestReview(); return true; } catch { return false; }
+}
+
 export function applyTheme() {
   const t = getSettings().theme;
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;

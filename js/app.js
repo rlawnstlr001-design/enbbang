@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency,
-} from './settle.js?v=202610071621';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071621';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071621';
+} from './settle.js?v=202610071636';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071636';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071636';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610071621';
+} from './share.js?v=202610071636';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
-  getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610071621';
+  getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
+} from './native.js?v=202610071636';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD',
   'IDR', 'MYR', 'CAD', 'CHF', 'NZD'];
@@ -247,6 +247,7 @@ function renderHome() {
     </form>
     ${recent.length ? `<div class="card recent" style="margin-top:16px"><b>최근 여행방</b>
       ${recent.map((t) => `<a href="#/t/${esc(t.id)}"><span>${esc(t.name)}</span><span class="muted small">${new Date(t.at).toLocaleDateString('ko-KR')}</span></a>`).join('')}</div>` : ''}
+    <p class="muted small prep">✈️ 출발 전 입국 서류·eSIM·환전 정리는 <a href="https://blog.naver.com/solo_os" target="_blank" rel="noopener" data-prep>여행 실무 노트</a>에서 볼 수 있어요 (운영자 블로그)</p>
     <p class="muted small" style="margin-top:24px">${store.mode === 'cloud'
       ? '링크를 받은 사람은 누구나 이 방을 보고 입력할 수 있어요. 방은 마지막 사용 후 90일 뒤 정리돼요.'
       : '로컬 모드: 이 기기에만 저장돼요. 공유 링크에는 그 시점의 내용이 담겨요.'}
@@ -278,7 +279,17 @@ function renderHome() {
   mInput.onkeydown = (ev) => {
     if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); addMembers(); }
   };
+  // '같은 멤버로 새 여행방'으로 왔으면 이름·정산 통화를 채워 둔다
+  let prefill = null;
+  try { prefill = JSON.parse(sessionStorage.getItem('enbbang:prefill') || 'null'); sessionStorage.removeItem('enbbang:prefill'); } catch { /* 무시 */ }
+  if (prefill?.names?.length) {
+    members.push(...prefill.names.slice(0, 30));
+    if (CURRENCIES.includes(prefill.base)) $app.querySelector('#create').base.value = prefill.base;
+    setTimeout(() => $app.querySelector('#create').name.focus(), 50);
+    toast(`지난 여행 멤버 ${prefill.names.length}명을 채워 뒀어요`);
+  }
   renderMembers();
+  $app.querySelector('[data-prep]')?.addEventListener('click', () => store.logEvent(null, 'prep_link'));
 
   $app.querySelector('#create').onsubmit = async (e) => {
     e.preventDefault();
@@ -293,6 +304,7 @@ function renderHome() {
       me.set(t.id, t.participants[0].id);
       store.claimParticipant(t.id, t.participants[0].id).catch(() => {});
       sessionStorage.setItem(`fresh:${t.id}`, '1'); // 방금 만든 방 → 초대 카드를 크게
+      store.logEvent(t.id, 'trip_source', firstTouch()); // 어디서 와서 방을 만들었나 (블로그·쇼츠·인스타 utm)
       location.hash = `#/t/${t.id}`;
     } catch (err) { report(err); e.target.querySelector('button').disabled = false; }
   };
@@ -541,7 +553,8 @@ function renderSettle(body, t, result) {
       <button role="radio" aria-checked="${result.mode === 'direct'}" data-mode="direct">낸 사람에게 직접</button>
     </div>
     <p class="muted small mode-note">${modeNote}</p>
-    ${allDone ? `<div class="card celebrate"><b>🎉 정산 끝!</b><p class="small">모든 송금이 완료됐어요.</p></div>` : ''}
+    ${allDone || t.settledAt ? `<div class="card celebrate"><b>🎉 정산 끝!</b><p class="small">모든 송금이 완료됐어요. 다음 여행도 같이 가나요?</p>
+      <button class="btn block" id="same-new" style="margin-top:8px">👥 같은 멤버로 새 여행방</button></div>` : ''}
     ${statementCard(t)}
     <div class="card">
       <div class="row between"><b>${pending.length ? `보낼 돈 ${pending.length}건` : '보낼 돈 없음'}</b>
@@ -601,12 +614,24 @@ function renderSettle(body, t, result) {
           view.trip = await store.getTrip(t.id);
         }
         const finished = !settle(view.trip).pending.length;
-        if (finished && !saved?.duplicate) store.logEvent(t.id, 'all_paid');
+        if (finished && !saved?.duplicate) {
+          store.logEvent(t.id, 'all_paid');
+          // 정산이 끝난 순간 = 가장 만족한 순간에 별점 요청 (한 기기 한 번)
+          setTimeout(() => askReview('enbbang:review').then((ok) => ok && store.logEvent(t.id, 'review_asked')), 1200);
+        }
         renderTrip();
         feedback(finished ? 'done' : 'paid');
         toast(saved?.duplicate ? `${pair} 송금은 방금 다른 사람이 보냈어요로 표시했어요` : `${pair} 송금 완료로 표시했어요`);
       } catch (err) { b.disabled = false; report(err); }
     };
+  });
+  body.querySelector('#same-new')?.addEventListener('click', () => {
+    // 나를 맨 앞에(방 만든 사람 = 나), 나머지는 원래 순서대로
+    const myPid = me.get(t.id);
+    const names = [...t.participants].sort((a, b) => (a.id === myPid ? -1 : b.id === myPid ? 1 : 0)).map((p) => p.name);
+    try { sessionStorage.setItem('enbbang:prefill', JSON.stringify({ names, base: t.baseCurrency })); } catch { /* 무시 */ }
+    store.logEvent(t.id, 'new_trip_same');
+    location.hash = '#/start';
   });
   body.querySelectorAll('[data-undo]').forEach((b) => {
     b.onclick = () => undoTransfer(t, result.transfers[+b.dataset.undo].paymentId);
@@ -1520,11 +1545,35 @@ function onBack() {
   return true;
 }
 
+// ───────── 유입 경로 ─────────
+// 블로그·쇼츠·인스타 링크에 붙인 utm을 첫 방문 때 기억해 두었다가(30일), 방을 만들 때 지표로 남긴다 (10/7)
+const UTM_KEY = 'enbbang:utm';
+function rememberUtm() {
+  const q = new URLSearchParams(location.search);
+  const source = q.get('utm_source');
+  if (!source) return;
+  try {
+    const old = JSON.parse(localStorage.getItem(UTM_KEY) || 'null');
+    if (old && Date.now() - old.at < 30 * 864e5) return; // 첫 유입을 우선
+    localStorage.setItem(UTM_KEY, JSON.stringify({
+      source: source.slice(0, 40), medium: (q.get('utm_medium') || '').slice(0, 40), campaign: (q.get('utm_campaign') || '').slice(0, 40), at: Date.now(),
+    }));
+  } catch { /* 저장 불가 */ }
+}
+function firstTouch() {
+  try {
+    const u = JSON.parse(localStorage.getItem(UTM_KEY) || 'null');
+    if (u && Date.now() - u.at < 30 * 864e5) return { source: u.source, medium: u.medium, campaign: u.campaign, app: isApp };
+  } catch { /* 무시 */ }
+  return { source: '', app: isApp };
+}
+
 // ───────── 시작 ─────────
 (async () => {
   // ?local=1 — 테스트·시연용. 실서버 지표를 오염시키지 않도록 로컬 모드로 강제
   const forceLocal = new URLSearchParams(location.search).has('local');
   applyTheme(); // 저장된 화면 테마 먼저
+  rememberUtm();
   store = await createStore(forceLocal ? null : window.ENBBANG_CONFIG);
   window.__enbbang = { store }; // 디버깅용
   history.replaceState({ d: 0 }, '');
