@@ -1,19 +1,20 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-  transferKey, brokenExpenses,
-} from './settle.js?v=202610071534';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071534';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071534';
+  transferKey, brokenExpenses, guessCurrency,
+} from './settle.js?v=202610071602';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071602';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071602';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610071534';
+} from './share.js?v=202610071602';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610071534';
+} from './native.js?v=202610071602';
 
-const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
+const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD',
+  'IDR', 'MYR', 'CAD', 'CHF', 'NZD'];
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet-root');
 
@@ -112,9 +113,21 @@ const isAdmin = (trip) => !!me.adminKey(trip.id);
 
 // ───────── 라우터 ─────────
 async function route() {
+  const h = location.hash.slice(1);
+  // 같은 여행방 안에서 탭만 바꾸는 경우 — 다시 불러오거나 실시간 연결을 새로 맺지 않는다 (10/7)
+  const same = h.match(/^\/t\/([\w-]+)(?:\/(settle|people))?$/);
+  if (same && view.trip && view.unsub && view.tripId === same[1]) {
+    closeSheet();
+    const tab = same[2] || 'list';
+    if (tab !== view.tab) {
+      view.tab = tab;
+      renderTrip();
+      if (tab === 'settle') store.logEvent(view.tripId, 'settle_viewed');
+    }
+    return;
+  }
   if (view.unsub) { view.unsub(); view.unsub = null; }
   closeSheet();
-  const h = location.hash.slice(1);
   // 웹에서 주소만 열면 소개 페이지 (본문은 index.html에 정적으로). #/… 링크와 앱은 바로 앱 화면, #/start = 방 만들기
   const landing = !isApp && !h.startsWith('/');
   const wasLanding = document.documentElement.classList.contains('landing');
@@ -149,7 +162,8 @@ function renderLanding() {
 }
 
 // 첫 화면 계산기 — 예시 지출(엔화) 켜고 끄기 + 직접 더하기 + 인원 → 1인당 원화. 환율은 앱과 같은 참고 환율(실패하면 예시 값)
-const LP_FALLBACK = { KRW: 1, JPY: 9.1, USD: 1390, EUR: 1610, TWD: 43, VND: 0.054, THB: 39, PHP: 24, CNY: 192, HKD: 178, SGD: 1070, GBP: 1850, AUD: 900 };
+const LP_FALLBACK = { KRW: 1, JPY: 9.1, USD: 1390, EUR: 1610, TWD: 43, VND: 0.054, THB: 39, PHP: 24, CNY: 192, HKD: 178, SGD: 1070, GBP: 1850, AUD: 900,
+  IDR: 0.085, MYR: 310, CAD: 1000, CHF: 1700, NZD: 820 };
 let lpCalcBound = false;
 // 환율 날짜 "06 Oct 2026" → "10/6"
 const lpDate = (s) => { const d = new Date(s); return isNaN(d) ? s : `${d.getMonth() + 1}/${d.getDate()}`; };
@@ -361,7 +375,7 @@ function renderTrip() {
     ${view.tab === 'list' ? '<button class="fab" id="add">＋ 지출</button>' : ''}`;
 
   $app.querySelectorAll('[data-tab]').forEach((b) => {
-    b.onclick = () => { location.hash = `#/t/${t.id}${b.dataset.tab === 'list' ? '' : '/' + b.dataset.tab}`; };
+    b.onclick = () => goTab(b.dataset.tab);
   });
   $app.querySelector('#share').onclick = () => shareTrip(t);
   const add = $app.querySelector('#add');
@@ -373,6 +387,21 @@ function renderTrip() {
   else if (view.tab === 'people') renderPeople(body, t);
   else renderList(body, t);
   updateOfflineBar();
+}
+
+// "2026-10-06" → "10월 6일 (월) · 2일차" (여행 첫 지출 날을 1일차로, 60일 넘으면 일차는 뺀다)
+const WEEK = '일월화수목금토';
+function dayLabel(date, start) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+  if (!m) return date || '';
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
+  let label = `${+m[2]}월 ${+m[3]}일 (${WEEK[d.getUTCDay()]})`;
+  const s = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start || '');
+  if (s) {
+    const n = Math.round((d - Date.UTC(+s[1], +s[2] - 1, +s[3], 12)) / 864e5) + 1;
+    if (n >= 1 && n <= 60) label += ` · ${n}일차`;
+  }
+  return label;
 }
 
 function renderList(body, t) {
@@ -389,6 +418,7 @@ function renderList(body, t) {
     ? `<p class="muted small">통화별 합계: ${Object.entries(byCur).map(([c, v]) => fmtMajor(v, c)).join(' · ')}</p>` : '';
 
   let lastDay = '';
+  const start = spends.map((e) => e.date).filter(Boolean).sort()[0];
   // 금액·환율·나눌 사람이 비어 계산에서 뺀 지출 — 방은 그대로 열고, 고쳐 달라고만 알린다
   const broken = new Set(brokenExpenses(t).map((e) => e.id));
   body.innerHTML = `
@@ -399,7 +429,7 @@ function renderList(body, t) {
     ${curLine}
     ${!spends.length ? `<div class="empty">아직 지출이 없어요.<br>아래 <b>＋ 지출</b>로 첫 항목을 넣어 보세요.</div>` : ''}
     ${list.map((e) => {
-      const day = e.date !== lastDay ? `<div class="day">${esc(e.date)}</div>` : '';
+      const day = e.date !== lastDay ? `<div class="day">${esc(dayLabel(e.date, start))}</div>` : '';
       lastDay = e.date;
       if (e.kind === 'transfer') {
         return `${day}<div class="exp transfer" data-tid="${esc(e.id)}">
@@ -527,11 +557,11 @@ function renderSettle(body, t, result) {
     </div>
     ${catCard(t, result.totalSpent)}
     <details class="card" style="margin-top:12px"><summary>계산 근거 보기</summary>
-      <table class="basis num"><thead><tr><th>이름</th><th>낸 돈</th><th>쓴 몫</th><th>송금</th><th>남은 차액</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="basis num"><thead><tr><th>이름</th><th>낸 돈</th><th>쓴 몫</th><th>송금</th><th>남은 차액</th></tr></thead><tbody>
       ${result.balances.map((b) => `<tr><td>${esc(nameOf(t, b.pid))}</td><td>${fmt(b.paid, cur)}</td><td>${fmt(b.owed, cur)}</td>
         <td>${[b.sent && `보냄 ${fmt(b.sent, cur)}`, b.received && `받음 ${fmt(b.received, cur)}`].filter(Boolean).join(' / ') || '—'}</td>
         <td class="${b.net > 0 ? 'plus' : b.net < 0 ? 'minus' : ''}">${b.net > 0 ? '+' : ''}${fmt(b.net, cur)}</td></tr>`).join('')}
-      </tbody></table>
+      </tbody></table></div>
       <p class="muted small">남은 차액이 +면 받을 돈, −면 낼 돈. 외화 지출은 입력한 환율(또는 카드 청구액)로 ${cur} 환산. 나누어 떨어지지 않는 1${cur === 'KRW' ? '원' : ' 단위'}은 목록 앞사람이 냅니다.</p>
     </details>
     ${isAdmin(t) ? `<button class="btn ghost block" id="mark" style="margin-top:12px">${t.settledAt ? '정산 완료 취소' : '정산 완료로 표시'}</button>` : ''}`;
@@ -632,9 +662,7 @@ function renderSettle(body, t, result) {
     if (navigator.canShare?.({ files: [file] })) {
       try { await navigator.share({ files: [file], title: `${t.name} 정산` }); return; } catch { /* 취소 → 다운로드로 */ }
     }
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: file.name });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    showShareImage(blob, file.name);
   };
   const mark = body.querySelector('#mark');
   if (mark) mark.onclick = async () => {
@@ -721,13 +749,37 @@ function renderPeople(body, t) {
 }
 
 // ───────── 시트 ─────────
+let sheetReturn = null; // 시트를 닫으면 포커스를 돌려줄 곳
 function openSheet(html, onMount) {
-  $sheet.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
+  if (!$sheet.innerHTML) sheetReturn = document.activeElement;
+  $sheet.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-modal="true" tabindex="-1">${html}</div></div>`;
   const scrim = $sheet.querySelector('.scrim');
+  const sheet = $sheet.querySelector('.sheet');
+  const h = sheet.querySelector('h2, h3, b');
+  if (h) { h.id = h.id || 'sheet-title'; sheet.setAttribute('aria-labelledby', h.id); }
   scrim.addEventListener('click', (e) => { if (e.target === scrim && !scrim.dataset.locked) closeSheet(); });
-  onMount($sheet.querySelector('.sheet'), scrim);
+  onMount(sheet, scrim);
+  // onMount가 입력칸에 포커스를 주지 않았으면 시트 자체로 (화면 읽기 프로그램이 시트부터 읽게)
+  setTimeout(() => { if (!sheet.contains(document.activeElement)) sheet.focus({ preventScroll: true }); }, 60);
 }
-function closeSheet() { $sheet.innerHTML = ''; }
+function closeSheet() {
+  if (!$sheet.innerHTML) return;
+  $sheet.innerHTML = '';
+  if (sheetReturn?.isConnected) sheetReturn.focus({ preventScroll: true });
+  sheetReturn = null;
+}
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+document.addEventListener('keydown', (e) => {
+  const scrim = $sheet.querySelector('.scrim');
+  if (!scrim) return;
+  if (e.key === 'Escape' && !scrim.dataset.locked) { e.preventDefault(); closeSheet(); return; }
+  if (e.key !== 'Tab') return;
+  const items = [...scrim.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !scrim.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 
 function pickIdentity() {
   const t = view.trip;
@@ -1333,8 +1385,22 @@ addEventListener('touchend', (e) => {
   if (!next) return reset();
   haptic('tap');
   view.slide = dx < 0 ? 'left' : 'right';
-  location.hash = `#/t/${view.tripId}${next === 'list' ? '' : '/' + next}`;
+  goTab(next);
 }, { passive: true });
+
+// 정산 이미지 보기 — 공유창이 없는 브라우저(카톡 안 브라우저 등)는 내려받기도 막혀 있어서 눌러도 반응이 없었다 (10/7)
+// 이미지를 화면에 띄우고 "길게 눌러 저장"을 안내한다. 내려받기가 되는 PC 브라우저는 저장 버튼도 같이
+async function showShareImage(blob, name) {
+  const url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(blob); });
+  const inApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent);
+  openSheet(`<h3>정산 이미지</h3>
+    <img class="share-img" src="${url}" alt="정산 결과 이미지">
+    <p class="muted small">${inApp ? '이미지를 <b>길게 눌러</b> 저장한 뒤 단톡방에 보내 주세요.' : '이미지를 길게 누르거나 아래 버튼으로 저장해 단톡방에 보내 주세요.'}</p>
+    <div class="row">${inApp ? '' : `<a class="btn primary grow" href="${url}" download="${esc(name)}">이미지 저장</a>`}
+      <button class="btn grow" id="img-close">닫기</button></div>`, (el) => {
+    el.querySelector('#img-close').onclick = closeSheet;
+  });
+}
 
 // 영수증 크게 보기 (화면 아무 데나 누르면 닫힘)
 function showPhoto(url) {
@@ -1390,7 +1456,13 @@ function settingsSheet() {
 document.addEventListener('click', (e) => { if (e.target.closest('[data-settings]')) settingsSheet(); });
 
 function lastCurrency(t) {
-  try { return localStorage.getItem(`enbbang:lastcur:${t.id}`) || t.baseCurrency; } catch { return t.baseCurrency; }
+  let saved = null;
+  try { saved = localStorage.getItem(`enbbang:lastcur:${t.id}`); } catch { /* 사생활 보호 모드 */ }
+  if (saved) return saved;
+  // 아직 이 기기에서 지출을 안 넣었으면: 이 방에서 가장 최근 외화 지출 통화 → 방 이름으로 짐작한 여행지 통화 → 정산 통화
+  const recent = [...t.expenses].reverse().find((e) => !e.deletedAt && e.kind !== 'transfer' && e.currency !== t.baseCurrency);
+  const guess = recent?.currency || guessCurrency(t.name);
+  return guess && CURRENCIES.includes(guess) ? guess : t.baseCurrency;
 }
 
 // ───────── 초대(공유) ─────────
@@ -1423,6 +1495,12 @@ let depth = 0;
 let replacing = false;
 let backAt = 0;
 function replaceHash(h) { replacing = true; location.replace(h); }
+// 탭 전환은 기록을 쌓지 않는다 — 탭을 여러 번 바꾼 뒤 뒤로가기를 눌러도 탭을 거슬러 가지 않고 방 밖으로 (10/7)
+function goTab(tab) {
+  if (!view.tripId) return;
+  const h = `#/t/${view.tripId}${tab === 'list' ? '' : '/' + tab}`;
+  if (location.hash !== h) replaceHash(h);
+}
 function onHashChange() {
   const d = history.state?.d;
   if (replacing) { replacing = false; history.replaceState({ d: depth }, ''); }

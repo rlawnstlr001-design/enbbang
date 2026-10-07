@@ -434,3 +434,9 @@ html.landing body { background: #FFFFFF; }
 .err-screen p { margin: 0 0 18px; word-break: keep-all; }
 .err-screen .btn { min-height: 52px; padding: 12px 28px; }
 .err-screen p:last-child { margin: 18px 0 0; }
+/* 좁은 화면: 계산 근거 표는 표만 옆으로 밀린다 (10/7) */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
+.table-wrap table.basis { min-width: 420px; }
+/* 정산 이미지 보기 */
+.share-img { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; margin: 10px 0; background: var(--surface-2); }
+.sheet:focus { outline: none; }

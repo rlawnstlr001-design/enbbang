@@ -84,7 +84,17 @@ export function applyTheme() {
   const t = getSettings().theme;
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  syncStatusBar();
 }
+// 상태 표시줄을 화면 테마와 맞춘다 — 다크 모드에서 위쪽 띠만 밝게 남던 문제 (10/7)
+export function syncStatusBar() {
+  if (!isApp) return;
+  const forced = document.documentElement.dataset.theme;
+  const dark = forced ? forced === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  StatusBar.setStyle({ style: dark ? 'DARK' : 'LIGHT' }).catch(() => {}); // DARK = 어두운 바탕용 밝은 글씨
+  if (platform === 'android') StatusBar.setBackgroundColor({ color: dark ? '#17130F' : '#FFF8EC' }).catch(() => {});
+}
+
 
 // ───── 진동 ─────
 // kind: 'tap'(가벼운 누름) | 'add'(저장) | 'paid'(송금 완료) | 'done'(정산 끝)
@@ -158,8 +168,8 @@ export async function scheduleReminder({ key, title, body, at, hash }) {
 export function initNative({ onOpenHash, onBack }) {
   if (!isApp) return;
   document.documentElement.classList.add('is-app', `is-${platform}`);
-  StatusBar.setStyle({ style: 'LIGHT' }).catch(() => {});
-  if (platform === 'android') StatusBar.setBackgroundColor({ color: '#FFF8EC' }).catch(() => {});
+  syncStatusBar();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncStatusBar);
 
   const openUrl = (url) => {
     try {

@@ -6,7 +6,7 @@
 //          expenses: [{ id, title, date, amount, currency, rate, baseOverride,
 //                       payerId, shares: [{ pid, w }], device, createdAt, deletedAt }] }
 
-import { tidyTrip } from './settle.js?v=202610071534';
+import { tidyTrip } from './settle.js?v=202610071602';
 
 const LS = {
   get(k, d = null) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
