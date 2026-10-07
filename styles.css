@@ -401,6 +401,10 @@ html.landing body { background: #FFFFFF; }
 }
 @media (prefers-reduced-motion: reduce) { .lp-item { transition: none; } }
 .pay-changed { color: var(--minus); font-weight: 700; margin: 4px 0 0; width: 100%; }
+/* 계산에서 뺀 지출 알림 (10/7) */
+.broken-card { border: 2px solid var(--minus); margin-bottom: 12px; }
+.broken-card p { margin: 6px 0 0; }
+.badge.broken { background: var(--minus); color: var(--on-accent); font-weight: 700; }
 /* 카드 명세서로 맞추기 */
 .stmt-card { margin-bottom: 12px; border: 2px dashed var(--accent); }
 .stmt-card.done { border-style: solid; border-color: var(--line); }
@@ -426,3 +430,7 @@ html.landing body { background: #FFFFFF; }
 .member-chip button, .rc-x { position: relative; }
 .member-chip button::after, .rc-x::after { content: ""; position: absolute; inset: -9px; }
 .step.sm, .chip.sm, .link-btn { min-height: 44px; }
+/* 못 불러왔을 때 화면 (10/7) */
+.err-screen p { margin: 0 0 18px; word-break: keep-all; }
+.err-screen .btn { min-height: 52px; padding: 12px 28px; }
+.err-screen p:last-child { margin: 18px 0 0; }

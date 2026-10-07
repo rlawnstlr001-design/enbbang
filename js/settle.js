@@ -32,6 +32,40 @@ export function expenseBaseMinor(exp, baseCur) {
   return Math.round(Number(exp.amount) * rate * 10 ** decimalsOf(baseCur));
 }
 
+// 서버에서 받은 방 데이터를 화면·계산이 믿고 쓸 모양으로 정리한다.
+// 예전 앱·끊긴 요청으로 모양이 깨진 지출 한 건 때문에 방 전체가 안 열리는 일을 막는다 (10/7)
+export function tidyTrip(trip) {
+  if (!trip || typeof trip !== 'object') return trip;
+  const participants = Array.isArray(trip.participants) ? trip.participants.filter((p) => p && p.id) : [];
+  const expenses = (Array.isArray(trip.expenses) ? trip.expenses : []).filter((e) => e && e.id).map((e) => ({
+    ...e,
+    title: typeof e.title === 'string' && e.title ? e.title : '(내용 없음)',
+    date: typeof e.date === 'string' ? e.date : '',
+    currency: typeof e.currency === 'string' ? e.currency.toUpperCase() : '',
+    shares: Array.isArray(e.shares)
+      ? e.shares.filter((s) => s && typeof s.pid === 'string').map((s) => ({ ...s, w: Number(s.w) }))
+      : [],
+  }));
+  return { ...trip, participants, expenses };
+}
+
+// 계산에 쓸 수 있는 지출인지 — 금액·환율이 숫자이고 나눌 사람이 있어야 한다
+export function isUsable(exp, baseCur) {
+  if (!Array.isArray(exp.shares) || !exp.shares.some((s) => Number.isFinite(s.w) && s.w > 0)) return false;
+  if (!/^[A-Z]{3}$/.test(exp.currency || '')) return false;
+  try {
+    const v = expenseBaseMinor(exp, baseCur);
+    return Number.isFinite(v) && v >= 0;
+  } catch { return false; }
+}
+
+// 계산에서 뺀 지출(지우지 않은 것만) — 화면에 "고쳐 주세요"로 알린다
+export function brokenExpenses(trip) {
+  return trip.expenses.filter((e) => !e.deletedAt && !isUsable(e, trip.baseCurrency));
+}
+
+const usableShares = (exp, ids) => exp.shares.filter((s) => ids.has(s.pid) && Number.isFinite(s.w) && s.w > 0);
+
 // 정수 total을 가중치대로 나눈다 (최대 잔여법). 합계가 정확히 total이 되도록 보장.
 // 동률은 입력 순서가 앞선 사람이 1원을 더 낸다 — 결정적이어야 재계산해도 결과가 같다.
 export function splitMinor(total, weights) {
@@ -52,8 +86,8 @@ export function computeBalances(trip) {
   const base = trip.baseCurrency;
   const bal = new Map(trip.participants.map((p) => [p.id, { paid: 0, owed: 0 }]));
   for (const exp of trip.expenses) {
-    if (exp.deletedAt || exp.kind === 'transfer') continue;
-    const shares = (exp.shares || []).filter((s) => bal.has(s.pid) && s.w > 0);
+    if (exp.deletedAt || exp.kind === 'transfer' || !isUsable(exp, base)) continue;
+    const shares = usableShares(exp, bal);
     if (!shares.length || !bal.has(exp.payerId)) continue;
     const total = expenseBaseMinor(exp, base);
     const parts = splitMinor(total, shares.map((s) => s.w));
@@ -174,8 +208,8 @@ export function directTransfers(trip, pays = []) {
   const debt = new Map(); // "a>b" → a가 b에게 줄 돈
   const add = (a, b, v) => { const k = `${a}>${b}`; debt.set(k, (debt.get(k) || 0) + v); };
   for (const exp of trip.expenses) {
-    if (exp.deletedAt || exp.kind === 'transfer') continue;
-    const shares = (exp.shares || []).filter((s) => ids.has(s.pid) && s.w > 0);
+    if (exp.deletedAt || exp.kind === 'transfer' || !isUsable(exp, base)) continue;
+    const shares = usableShares(exp, ids);
     if (!shares.length || !ids.has(exp.payerId)) continue;
     const parts = splitMinor(expenseBaseMinor(exp, base), shares.map((s) => s.w));
     shares.forEach((s, i) => { if (s.pid !== exp.payerId) add(s.pid, exp.payerId, parts[i]); });
@@ -198,8 +232,23 @@ export function directTransfers(trip, pays = []) {
 export function paymentsOf(trip) {
   const ids = new Set(trip.participants.map((p) => p.id));
   return trip.expenses
-    .filter((e) => !e.deletedAt && e.kind === 'transfer' && ids.has(e.payerId) && ids.has(e.shares?.[0]?.pid))
+    .filter((e) => !e.deletedAt && e.kind === 'transfer' && ids.has(e.payerId) && ids.has(e.shares?.[0]?.pid)
+      && isUsable(e, trip.baseCurrency))
     .map((e) => ({ id: e.id, from: e.payerId, to: e.shares[0].pid, amount: expenseBaseMinor(e, trip.baseCurrency) }));
+}
+
+// "보냈어요" 한 번에 붙는 표시(cid). 같은 송금을 두 사람이 동시에, 또는 오래된 화면에서 눌러도
+// 같은 표시가 나오므로 서버가 한 건만 남긴다(009). 보낸 사람·받는 사람·금액·이미 기록된 같은 쌍 송금 수로 정한다.
+export function transferKey(trip, x) {
+  const n = trip.expenses.filter((e) => !e.deletedAt && e.kind === 'transfer'
+    && e.payerId === x.from && e.shares?.[0]?.pid === x.to).length;
+  const s = `${trip.id}|${x.from}|${x.to}|${x.amount}|${n}`;
+  const fnv = (str) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36);
+  };
+  return `tmp_x${fnv(s)}${fnv(`${s}#`)}`;
 }
 
 // 정산 결과. transfers 각 항목에 done(보냈음)이 붙는다.

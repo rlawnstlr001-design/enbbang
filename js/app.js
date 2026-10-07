@@ -1,16 +1,17 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-} from './settle.js?v=202610070811';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610070811';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610070811';
+  transferKey, brokenExpenses,
+} from './settle.js?v=202610071534';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071534';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071534';
 import {
-  encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText,
-} from './share.js?v=202610070811';
+  encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
+} from './share.js?v=202610071534';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage,
-} from './native.js?v=202610070811';
+} from './native.js?v=202610071534';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD'];
 const $app = document.getElementById('app');
@@ -70,7 +71,7 @@ const isNetErr = (e) => !navigator.onLine || /fetch|network|load failed|timeout/
 // 저장 실패 처리: 네트워크 문제면 막대로 크게 알리고(시트는 열린 채라 다시 누르면 됨), 그 외는 토스트
 function report(err) {
   if (isNetErr(err)) showNet('save', '저장하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.');
-  else toast(err.message);
+  else toast(friendly(err));
 }
 
 async function refreshTrip() {
@@ -303,7 +304,10 @@ async function openTrip(id, tab) {
   try {
     view.trip = await store.getTrip(id);
   } catch (e) {
-    $app.innerHTML = `<div class="empty">${esc(e.message)}<br><br><a href="#/">처음으로</a></div>`;
+    // 못 불러왔을 때 — 무엇이 문제인지 한국어로, 다시 시도 버튼
+    $app.innerHTML = `<div class="empty err-screen" role="alert"><p>${esc(friendly(e))}</p>
+      <button class="btn primary" id="retry">다시 시도</button><p><a href="#/">처음으로</a></p></div>`;
+    $app.querySelector('#retry').onclick = () => route();
     return;
   }
   let wasDown = false;
@@ -385,7 +389,11 @@ function renderList(body, t) {
     ? `<p class="muted small">통화별 합계: ${Object.entries(byCur).map(([c, v]) => fmtMajor(v, c)).join(' · ')}</p>` : '';
 
   let lastDay = '';
+  // 금액·환율·나눌 사람이 비어 계산에서 뺀 지출 — 방은 그대로 열고, 고쳐 달라고만 알린다
+  const broken = new Set(brokenExpenses(t).map((e) => e.id));
   body.innerHTML = `
+    ${broken.size ? `<div class="card broken-card" role="status"><b>⚠️ 정산에서 뺀 지출 ${broken.size}건</b>
+      <p class="small">금액·환율·나눌 사람 중 비어 있는 게 있어요. 아래 <b>계산 제외</b> 표시된 지출을 눌러 고쳐 주세요.</p></div>` : ''}
     ${inviteCard(t, spends.length)}
     ${live.length > 4 ? `<input class="input" id="q" type="search" placeholder="검색 (내용·낸 사람)" value="${esc(view.q)}">` : ''}
     ${curLine}
@@ -408,7 +416,7 @@ function renderList(body, t) {
       const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES.find((c) => c.id === 'etc');
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
         <span class="cat-ico" aria-label="${cat.label}">${cat.emoji}</span>
-        <div class="grow"><div class="t">${esc(e.title)}${e.receipt ? ' <span class="rc-mark" aria-label="영수증 있음">🧾</span>' : ''}${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}</div>
+        <div class="grow"><div class="t">${esc(e.title)}${e.receipt ? ' <span class="rc-mark" aria-label="영수증 있음">🧾</span>' : ''}${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}${broken.has(e.id) ? ' <span class="badge broken">계산 제외</span>' : ''}</div>
           <div class="muted small">${esc(nameOf(t, e.payerId))} 결제 · ${who}</div></div>
         <div class="amt num">${fmtMajor(e.amount, e.currency)}${baseLine}</div></div>`;
     }).join('')}`;
@@ -539,18 +547,34 @@ function renderSettle(body, t, result) {
     b.onclick = async () => {
       const x = result.transfers[+b.dataset.paid];
       b.disabled = true;
+      const pair = `${nameOf(t, x.from)} → ${nameOf(t, x.to)}`;
       try {
-        await store.addExpense(t.id, {
+        // 다른 사람이 먼저 눌렀을 수 있다 — 최신 정산에 아직 남아 있는지 확인하고 기록한다
+        let cur0 = t;
+        try { cur0 = await store.getTrip(t.id); } catch { /* 연결이 없으면 지금 화면 기준 */ }
+        const still = settle(cur0).pending.some((p) => p.from === x.from && p.to === x.to && p.amount === x.amount);
+        if (!still) {
+          view.trip = cur0; renderTrip();
+          return toast(`${pair} 송금은 이미 보냈어요로 표시돼 있어요`);
+        }
+        const exp = {
           kind: 'transfer', title: `송금 ${nameOf(t, x.from)}→${nameOf(t, x.to)}`, date: today(),
           amount: x.amount / 10 ** decimalsOf(cur), currency: cur, rate: null, baseOverride: null,
           payerId: x.from, shares: [{ pid: x.to, w: 1 }],
-        });
+        };
+        let saved = await store.addExpense(t.id, { ...exp, cid: transferKey(cur0, x) });
         view.trip = await store.getTrip(t.id);
+        // 같은 표시가 '취소된 기록'을 가리키는데 서버가 되살리지 못한 경우(009 이전 서버) — 새 표시로 한 번 더
+        const stillPending = (tr) => settle(tr).pending.some((p) => p.from === x.from && p.to === x.to && p.amount === x.amount);
+        if (saved?.duplicate && stillPending(view.trip)) {
+          saved = await store.addExpense(t.id, exp);
+          view.trip = await store.getTrip(t.id);
+        }
         const finished = !settle(view.trip).pending.length;
-        if (finished) store.logEvent(t.id, 'all_paid');
+        if (finished && !saved?.duplicate) store.logEvent(t.id, 'all_paid');
         renderTrip();
         feedback(finished ? 'done' : 'paid');
-        toast(`${nameOf(t, x.from)} → ${nameOf(t, x.to)} 송금 완료로 표시했어요`);
+        toast(saved?.duplicate ? `${pair} 송금은 방금 다른 사람이 보냈어요로 표시했어요` : `${pair} 송금 완료로 표시했어요`);
       } catch (err) { b.disabled = false; report(err); }
     };
   });

@@ -6,6 +6,8 @@
 //          expenses: [{ id, title, date, amount, currency, rate, baseOverride,
 //                       payerId, shares: [{ pid, w }], device, createdAt, deletedAt }] }
 
+import { tidyTrip } from './settle.js?v=202610071534';
+
 const LS = {
   get(k, d = null) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 사생활 보호 모드 등 */ } },
@@ -107,7 +109,7 @@ export class LocalStore {
     this.#save(t);
     return t;
   }
-  async getTrip(id) { const t = this.#load(id); rememberTrip(t); return t; }
+  async getTrip(id) { const t = this.#load(id); rememberTrip(t); return tidyTrip(t); }
   async importSnapshot(t) {
     // 스냅샷은 같은 id를 쓰되, 이미 있으면 덮어쓴다 (가장 최근 링크가 정답)
     me.setAdminKey(t.id, me.adminKey(t.id) || 'local');
@@ -216,12 +218,12 @@ export class CloudStore {
     } catch (e) {
       const cached = isNetError(e) && LS.get(`enbbang:cache:${id}`);
       if (!cached) throw e;
-      return withOutbox({ ...cached, offline: true });
+      return tidyTrip(withOutbox({ ...cached, offline: true }));
     }
     if (!t) throw new Error('여행방을 찾을 수 없어요');
     rememberTrip(t);
     cacheTrip(t);
-    return withOutbox(t);
+    return tidyTrip(withOutbox(t));
   }
   async addParticipant(id, name) {
     const p = await this.#rpc('enb_add_participant', { p_trip: id, p_name: name });
@@ -237,7 +239,8 @@ export class CloudStore {
   }
   async addExpense(id, exp) {
     // cid: 응답만 끊겨 서버엔 이미 들어간 경우 다시 보내도 한 건만 남게 하는 표시
-    const cid = `tmp_${uid(10)}`;
+    // 송금 "보냈어요"는 같은 송금이면 같은 표시(transferKey)를 쓴다 — 두 사람이 눌러도 한 건만 남게(009)
+    const cid = exp.cid || `tmp_${uid(10)}`;
     const body = { ...exp, cid };
     // 앞서 못 보낸 게 있으면 순서를 지키려고 이것도 대기열 뒤에 붙인다
     if (!outbox.all().length) {
