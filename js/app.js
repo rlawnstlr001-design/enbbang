@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency,
-} from './settle.js?v=202610071636';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071636';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071636';
+} from './settle.js?v=202610071749';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610071749';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610071749';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610071636';
+} from './share.js?v=202610071749';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610071636';
+} from './native.js?v=202610071749';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD',
   'IDR', 'MYR', 'CAD', 'CHF', 'NZD'];
@@ -247,7 +247,12 @@ function renderHome() {
     </form>
     ${recent.length ? `<div class="card recent" style="margin-top:16px"><b>최근 여행방</b>
       ${recent.map((t) => `<a href="#/t/${esc(t.id)}"><span>${esc(t.name)}</span><span class="muted small">${new Date(t.at).toLocaleDateString('ko-KR')}</span></a>`).join('')}</div>` : ''}
-    <p class="muted small prep">✈️ 출발 전 입국 서류·eSIM·환전 정리는 <a href="https://blog.naver.com/solo_os" target="_blank" rel="noopener" data-prep>여행 실무 노트</a>에서 볼 수 있어요 (운영자 블로그)</p>
+    <div class="card prep">
+      <b>✈️ 출발 전 준비</b>
+      <p class="small">데이터 eSIM은 <a href="https://usimsa.com/affiliate/3061" target="_blank" rel="noopener sponsored" data-prep="usimsa">유심사</a>에서 미리 살 수 있어요. 목적지·기간에 맞는 상품인지 확인하고 고르세요.
+        <span class="muted">(제휴 링크: 이 링크로 구매하면 트립N빵 운영자가 판매 수수료를 받아요)</span></p>
+      <p class="small">입국 서류·환전은 운영자 블로그 <a href="https://blog.naver.com/solo_os" target="_blank" rel="noopener" data-prep="blog">여행 실무 노트</a>, 여행지별 정산 방법은 <a href="${isApp ? SITE : './'}guide/" ${isApp ? 'target="_blank" rel="noopener"' : ''} data-prep="guide">여행지별 정산 안내</a>에 있어요.</p>
+    </div>
     <p class="muted small" style="margin-top:24px">${store.mode === 'cloud'
       ? '링크를 받은 사람은 누구나 이 방을 보고 입력할 수 있어요. 방은 마지막 사용 후 90일 뒤 정리돼요.'
       : '로컬 모드: 이 기기에만 저장돼요. 공유 링크에는 그 시점의 내용이 담겨요.'}
@@ -289,7 +294,7 @@ function renderHome() {
     toast(`지난 여행 멤버 ${prefill.names.length}명을 채워 뒀어요`);
   }
   renderMembers();
-  $app.querySelector('[data-prep]')?.addEventListener('click', () => store.logEvent(null, 'prep_link'));
+  $app.querySelectorAll('[data-prep]').forEach((a) => a.addEventListener('click', () => store.logEvent(null, 'prep_link', { kind: a.dataset.prep })));
 
   $app.querySelector('#create').onsubmit = async (e) => {
     e.preventDefault();

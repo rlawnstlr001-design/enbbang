@@ -19,10 +19,10 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23FF7A1A'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='800'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=202610071636">
+  <link rel="stylesheet" href="styles.css?v=202610071749">
   <!-- Supabase 클라이언트(package-lock 버전 고정, UMD → window.supabase). CDN 최신판을 받지 않아 갑자기 깨지거나 해외 약한 망에서 멈추지 않게 -->
-  <script src="js/supabase.js?v=202610071636"></script>
-  <script src="config.js?v=202610071636"></script>
+  <script src="js/supabase.js?v=202610071749"></script>
+  <script src="config.js?v=202610071749"></script>
   <script>
     // 소개 페이지는 웹에서 주소만 열었을 때만(#how 같은 쪽 안 이동 포함). 앱 안이거나 #/… 링크면 바로 앱 화면 (깜빡임 방지)
     if (location.hash.startsWith('#/') || window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.remove('landing');
@@ -187,7 +187,7 @@
       <details><summary>환율은 어디 기준인가요?</summary><p>지출을 넣을 때 참고 환율을 자동으로 채워요. 엔화는 10엔, 동은 1,000동 기준으로 보여요. 실제로 카드에 청구된 원화 금액을 알면 그 금액을 넣는 게 가장 정확해요.</p></details>
       <details><summary>잘못 넣은 지출은 고칠 수 있나요?</summary><p>지출을 눌러 고치거나 지울 수 있어요. 지운 직후 화면 아래 '되돌리기'를 5초 안에 누르면 되살릴 수 있어요.</p></details>
       <details><summary>여행방은 언제까지 보관되나요?</summary><p>마지막 이용 후 90일이 지나면 자동으로 삭제돼요. 바로 지우고 싶으면 문의 메일로 여행방 링크를 보내 주세요. 자세한 내용은 <a href="privacy.html">개인정보처리방침</a>에 있어요.</p></details>
-      <p class="lp-more"><a href="support.html">도움말 전체 보기 →</a></p>
+      <p class="lp-more"><a href="support.html">도움말 전체 보기 →</a> · <a href="guide/">여행지별 정산 안내 →</a></p>
     </section>
 
     <section class="lp-final">
@@ -198,7 +198,7 @@
 
     <footer class="lp-foot">
       <p>운영: 소소랩 · 문의 <a href="mailto:sosolab100@gmail.com">sosolab100@gmail.com</a></p>
-      <p><a href="support.html">도움말</a> · <a href="privacy.html">개인정보처리방침</a></p>
+      <p><a href="guide/">여행지별 정산 안내</a> · <a href="support.html">도움말</a> · <a href="privacy.html">개인정보처리방침</a></p>
     </footer>
   </main>
 
@@ -206,6 +206,6 @@
   <div id="app" aria-live="polite"><div class="boot">불러오는 중…</div></div>
   <div id="sheet-root"></div>
   <div id="toast" role="status"></div>
-  <script type="module" src="js/app.js?v=202610071636"></script>
+  <script type="module" src="js/app.js?v=202610071749"></script>
 </body>
 </html>

@@ -440,5 +440,6 @@ html.landing body { background: #FFFFFF; }
 /* 정산 이미지 보기 */
 .share-img { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; margin: 10px 0; background: var(--surface-2); }
 .sheet:focus { outline: none; }
-/* 여행 준비 안내 (운영자 블로그) */
-.prep { margin-top: 20px; }
+/* 여행 준비 안내 (유심사 제휴·운영자 블로그·여행지별 안내) */
+.prep { margin-top: 16px; }
+.prep p { margin: 6px 0 0; }
