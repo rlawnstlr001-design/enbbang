@@ -7,7 +7,8 @@
       "namespace": "android_app",
       "package_name": "com.tripnbbang.app",
       "sha256_cert_fingerprints": [
-        "0D:EE:70:50:FC:8C:57:68:48:51:F8:1A:3D:BF:C8:18:4C:2F:D7:21:FD:25:BB:0B:BF:D6:D5:8F:43:92:7A:9F"
+        "0D:EE:70:50:FC:8C:57:68:48:51:F8:1A:3D:BF:C8:18:4C:2F:D7:21:FD:25:BB:0B:BF:D6:D5:8F:43:92:7A:9F",
+        "4E:65:38:CD:5C:73:12:DA:CD:6A:81:F0:E9:3A:E8:B6:30:00:AC:B9:0A:A3:77:83:1A:0E:CF:40:4D:15:1F:8C"
       ]
     }
   }
