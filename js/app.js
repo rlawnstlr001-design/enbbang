@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610121037';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121037';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121037';
+} from './settle.js?v=202610121043';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121043';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121043';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610121037';
+} from './share.js?v=202610121043';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610121037';
+} from './native.js?v=202610121043';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -113,6 +113,12 @@ function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?
 const isAdmin = (trip) => !!me.adminKey(trip.id);
 // 혼자 쓰는 가계부 — 따로 표시 없이 참여자가 한 명인 방. 사람을 추가하면 그대로 정산 방이 된다 (10/12)
 const isSolo = (trip) => trip.participants.length === 1;
+// 공금(회비) — 서버 변경 없이 '💰 공금'이라는 특별한 참여자로 둔다(payInfo.pot). 회비 = 멤버→공금 송금,
+// 공금으로 낸 지출 = 공금이 낸 지출. 남은 공금은 정산에서 '공금 → 멤버'로 돌려준다. 이전 앱도 같은 정산이 나온다 (10/12)
+const POT_NAME = '💰 공금';
+const isPot = (p) => p?.payInfo?.pot === true;
+const potOf = (trip) => trip.participants.find(isPot) || null;
+const humans = (trip) => trip.participants.filter((p) => !isPot(p));
 const tabsOf = (trip) => (isSolo(trip) ? [['list', '지출'], ['book', '가계부']] : [['list', '지출'], ['settle', '정산'], ['people', '멤버']]);
 
 // ───────── 라우터 ─────────
@@ -464,10 +470,12 @@ function renderList(body, t) {
   const start = spends.map((e) => e.date).filter(Boolean).sort()[0];
   // 금액·환율·나눌 사람이 비어 계산에서 뺀 지출 — 방은 그대로 열고, 고쳐 달라고만 알린다
   const broken = new Set(brokenExpenses(t).map((e) => e.id));
+  const pot = potOf(t);
   body.innerHTML = `
     ${broken.size ? `<div class="card broken-card" role="status"><b>⚠️ 정산에서 뺀 지출 ${broken.size}건</b>
       <p class="small">금액·환율·나눌 사람 중 비어 있는 게 있어요. 아래 <b>계산 제외</b> 표시된 지출을 눌러 고쳐 주세요.</p></div>` : ''}
     ${inviteCard(t, spends.length)}
+    ${potCard(t)}
     ${fxUsed(t) ? `<div class="row list-tools"><button type="button" class="btn sm ghost" data-fx-open>💱 환전 기록${t.exchanges.length ? ` ${t.exchanges.length}건` : ''}</button></div>` : ''}
     ${live.length > 4 ? `<input class="input" id="q" type="search" placeholder="검색 (내용·낸 사람)" value="${esc(view.q)}">` : ''}
     ${curLine}
@@ -476,8 +484,13 @@ function renderList(body, t) {
       const day = e.date !== lastDay ? `<div class="day">${esc(dayLabel(e.date, start))}</div>` : '';
       lastDay = e.date;
       if (e.kind === 'transfer') {
+        const toPot = pot && e.shares[0]?.pid === pot.id;
+        const fromPot = pot && e.payerId === pot.id;
+        const label = toPot ? `💰 ${esc(nameOf(t, e.payerId))} 공금 회비`
+          : fromPot ? `💰 공금 → ${esc(nameOf(t, e.shares[0]?.pid))} 돌려줌`
+          : `💸 ${esc(nameOf(t, e.payerId))} → ${esc(nameOf(t, e.shares[0]?.pid))} 송금`;
         return `${day}<div class="exp transfer" data-tid="${esc(e.id)}">
-          <div class="grow"><div class="t">💸 ${esc(nameOf(t, e.payerId))} → ${esc(nameOf(t, e.shares[0]?.pid))} 송금${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}</div>
+          <div class="grow"><div class="t">${label}${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}</div>
             <div class="muted small">보냈어요 표시 · 눌러서 취소</div></div>
           <div class="amt num muted">${fmtMajor(e.amount, e.currency)}</div></div>`;
       }
@@ -486,7 +499,7 @@ function renderList(body, t) {
         try { baseLine = `<div class="muted small num">≈ ${fmt(expenseBaseMinor(e, t.baseCurrency), t.baseCurrency)}</div>`; } catch { baseLine = '<div class="minus small">환율 필요</div>'; }
       }
       const mode = splitModeOf(e.shares);
-      const who = `${e.shares.length === t.participants.length ? '전원' : `${e.shares.length}명`}${mode === 'parts' ? ' · 몫대로' : mode === 'exact' ? ' · 금액 지정' : ''}`;
+      const who = `${e.shares.length === humans(t).length ? '전원' : `${e.shares.length}명`}${mode === 'parts' ? ' · 몫대로' : mode === 'exact' ? ' · 금액 지정' : ''}`;
       const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES.find((c) => c.id === 'etc');
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
         <span class="cat-ico" aria-label="${cat.label}">${cat.emoji}</span>
@@ -510,13 +523,14 @@ function renderList(body, t) {
   });
   bindInviteCard(body, t);
   bindExchangeCard(body, t);
+  bindPotCard(body, t);
 }
 
 // 초대 카드: 방을 막 만들었거나, 아직 안 들어온 멤버가 있고 지출이 적을 때 맨 위에
 function inviteCard(t, spendCount) {
   if (isSolo(t)) return '';
   const cloud = store.mode === 'cloud';
-  const waiting = cloud ? t.participants.filter((p) => !p.joinedAt) : [];
+  const waiting = cloud ? humans(t).filter((p) => !p.joinedAt) : [];
   const fresh = sessionStorage.getItem(`fresh:${t.id}`) && spendCount < 3;
   if (!fresh && !(waiting.length && spendCount < 5) && spendCount > 0) return '';
   return `<div class="card invite">
@@ -524,7 +538,7 @@ function inviteCard(t, spendCount) {
     <p class="small">링크를 단톡방에 올리면, 친구는 이름만 고르면 바로 같이 적을 수 있어요.</p>
     <div class="row"><button class="btn primary grow" id="inv-share">카톡으로 초대하기</button>
       <button class="btn ghost" id="inv-copy">링크 복사</button></div>
-    ${cloud ? `<div class="joined small">${t.participants.map((p) => p.joinedAt
+    ${cloud ? `<div class="joined small">${humans(t).map((p) => p.joinedAt
       ? `<span class="on">✓ ${esc(p.name)}</span>` : `<span>${esc(p.name)} 대기</span>`).join('')}</div>` : ''}
   </div>`;
 }
@@ -553,7 +567,10 @@ async function undoTransfer(t, tid) {
 function renderSettle(body, t, result) {
   const cur = t.baseCurrency;
   const { pending } = result;
-  const done = result.transfers.filter((x) => x.done);
+  const pot = potOf(t);
+  const dues = (x) => pot && x.done && x.to === pot.id; // 이미 낸 회비 — 송금 목록 대신 공금 카드에
+  const done = result.transfers.filter((x) => x.done && !dues(x));
+  const shown = pot ? { ...result, transfers: result.transfers.filter((x) => !dues(x)) } : result; // 공유용
   const allDone = result.transfers.length > 0 && !pending.length;
   const modeNote = result.mode === 'direct'
     ? '지출마다 <b>낸 사람에게 바로</b> 갚아요. 송금 횟수는 늘 수 있어요.'
@@ -569,14 +586,16 @@ function renderSettle(body, t, result) {
         ${x.done
           ? `<span class="paid">✓ 보냈어요</span><button class="btn sm ghost" data-undo="${i}">취소</button>`
           : `<button class="btn sm send" data-paid="${i}">보냈어요 ✓</button>
-             <button class="btn sm ghost" data-remind="${i}">🔔 리마인드</button>
+             ${pot && x.from === pot.id ? '' : `<button class="btn sm ghost" data-remind="${i}">🔔 리마인드</button>`}
              ${isApp && x.from === me.get(t.id) ? `<button class="btn sm ghost" data-alarm="${i}">⏰ 내일 알림</button>` : ''}
              <button class="btn sm ghost" data-copy-amt="${i}">금액 복사</button>
              ${links.map((l, j) => l.href
                ? `<a class="btn sm ghost" href="${esc(l.href)}" target="_blank" rel="noopener" data-paylink="${l.kind}">${l.label}${l.over ? ' (한도 30만)' : ''}</a>`
                : `<button class="btn sm ghost" data-copy-acc="${i}:${j}">${l.label}</button>`).join('')}`}
       </div>
-      ${!x.done && !links.length ? `<p class="muted small hint">${esc(nameOf(t, x.to))}님이 멤버 탭에 송금 정보를 넣으면 송금 버튼이 생겨요</p>` : ''}
+      ${!x.done && pot && x.to === pot.id ? '<p class="muted small hint">공금이 모자라요. 공금을 맡은 사람에게 보내 주세요</p>'
+        : !x.done && pot && x.from === pot.id ? '<p class="muted small hint">남은 공금에서 돌려줄 돈이에요. 공금을 맡은 사람이 보내 주세요</p>'
+        : !x.done && !links.length ? `<p class="muted small hint">${esc(nameOf(t, x.to))}님이 멤버 탭에 송금 정보를 넣으면 송금 버튼이 생겨요</p>` : ''}
       ${!x.done && links.length && payChangedRecently(t, x.to) ? `<p class="small hint pay-changed">⚠️ ${esc(nameOf(t, x.to))}님 송금 정보가 최근 바뀌었어요. 보내기 전에 확인해 주세요</p>` : ''}
     </div>`;
   };
@@ -589,6 +608,7 @@ function renderSettle(body, t, result) {
     <p class="muted small mode-note">${modeNote}</p>
     ${allDone || t.settledAt ? `<div class="card celebrate"><b>🎉 정산 끝!</b><p class="small">모든 송금이 완료됐어요. 다음 여행도 같이 가나요?</p>
       <button class="btn block" id="same-new" style="margin-top:8px">👥 같은 멤버로 새 여행방</button></div>` : ''}
+    ${potCard(t)}
     ${statementCard(t)}
     <div class="card">
       <div class="row between"><b>${pending.length ? `보낼 돈 ${pending.length}건` : '보낼 돈 없음'}</b>
@@ -602,6 +622,7 @@ function renderSettle(body, t, result) {
       <button class="btn primary grow" id="share-text">카톡용 복사</button>
       <button class="btn grow" id="share-img">이미지로 공유</button>
     </div>
+    ${pot ? '' : potOffer(t)}
     ${exchangeCard(t)}
     ${catCard(t, result.totalSpent)}
     <details class="card" style="margin-top:12px"><summary>계산 근거 보기</summary>
@@ -663,7 +684,7 @@ function renderSettle(body, t, result) {
   body.querySelector('#same-new')?.addEventListener('click', () => {
     // 나를 맨 앞에(방 만든 사람 = 나), 나머지는 원래 순서대로
     const myPid = me.get(t.id);
-    const names = [...t.participants].sort((a, b) => (a.id === myPid ? -1 : b.id === myPid ? 1 : 0)).map((p) => p.name);
+    const names = humans(t).sort((a, b) => (a.id === myPid ? -1 : b.id === myPid ? 1 : 0)).map((p) => p.name);
     try { sessionStorage.setItem('enbbang:prefill', JSON.stringify({ names, base: t.baseCurrency })); } catch { /* 무시 */ }
     store.logEvent(t.id, 'new_trip_same');
     location.hash = '#/start';
@@ -679,7 +700,7 @@ function renderSettle(body, t, result) {
     const x = result.transfers[+b.dataset.remind];
     b.onclick = () => remind([x], `${nameOf(t, x.from)}님에게 보낼 알림을 복사했어요. 카톡에 붙여 넣으세요`);
   });
-  body.querySelector('#remind-all')?.addEventListener('click', () => remind(pending, '안 보낸 사람 모두에게 보낼 알림을 복사했어요'));
+  body.querySelector('#remind-all')?.addEventListener('click', () => remind(pending.filter((x) => !pot || x.from !== pot.id), '안 보낸 사람 모두에게 보낼 알림을 복사했어요'));
   // 앱 전용: 내가 보낼 돈이 있으면 내일 오전 10시에 휴대폰 알림
   body.querySelectorAll('[data-alarm]').forEach((b) => {
     const x = result.transfers[+b.dataset.alarm];
@@ -711,12 +732,13 @@ function renderSettle(body, t, result) {
   });
   body.querySelector('#stmt-open')?.addEventListener('click', () => statementSheet(t));
   bindExchangeCard(body, t);
+  bindPotCard(body, t);
   body.querySelector('#share-text').onclick = async () => {
-    copy(settlementText(t, result, (pid) => nameOf(t, pid), await tripLink(t)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
+    copy(settlementText(t, shown, (pid) => nameOf(t, pid), await tripLink(t)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
     store.logEvent(t.id, 'settle_shared', { via: 'text' });
   };
   body.querySelector('#share-img').onclick = async () => {
-    const blob = await settlementImage(t, result, (pid) => nameOf(t, pid));
+    const blob = await settlementImage(t, shown, (pid) => nameOf(t, pid));
     const file = new File([blob], `${t.name}-정산.png`, { type: 'image/png' });
     store.logEvent(t.id, 'settle_shared', { via: 'image' });
     if (await nativeShareImage(blob, `${t.id}-settle.png`, `${t.name} 정산`)) return;
@@ -848,6 +870,12 @@ function renderPeople(body, t) {
   body.innerHTML = `
     <div class="card">
       ${t.participants.map((p) => {
+        if (isPot(p)) {
+          const st = potStats(t);
+          return `<div class="member pot-member"><div class="row"><div class="grow"><div class="t">${esc(p.name)}</div>
+            <div class="muted small">걷은 돈 ${fmt(st.got, t.baseCurrency)} · 쓴 돈 ${fmt(st.spent, t.baseCurrency)} · 남은 돈 ${fmt(st.left, t.baseCurrency)}</div></div>
+            <button class="btn sm" data-pot-dues>회비 걷기</button></div></div>`;
+        }
         const i = p.payInfo || {};
         const has = [i.toss && '토스', i.kakao && '카카오페이', i.account && '계좌'].filter(Boolean).join('·');
         const w = p.defaultW ?? 1;
@@ -872,6 +900,7 @@ function renderPeople(body, t) {
         <button class="btn">추가</button></form>
     </div>
     <button class="btn ghost block" id="whoami" style="margin-top:12px">내가 누구인지 다시 고르기</button>
+    ${potOf(t) ? '' : potOffer(t)}
     ${store.mode === 'cloud' && myId ? '<button class="btn ghost block" id="move-dev">📱 다른 기기에서 이어서 쓰기</button>' : ''}
     ${store.mode === 'cloud' && isAdmin(t) ? '<button class="btn ghost block" id="tidy">🧹 참여자 정리 (이름·합치기·빼기)</button>' : ''}`;
   body.querySelector('[data-payinfo]')?.addEventListener('click', () => payInfoSheet(t.participants.find((p) => p.id === myId)));
@@ -902,6 +931,7 @@ function renderPeople(body, t) {
     catch (err) { report(err); }
   };
   body.querySelector('#whoami').onclick = () => pickIdentity();
+  bindPotCard(body, t);
   body.querySelector('#move-dev')?.addEventListener('click', () => moveSheet(t));
   body.querySelector('#tidy')?.addEventListener('click', () => tidySheet(t));
 }
@@ -944,7 +974,7 @@ function pickIdentity() {
   openSheet(`
     <h2>${esc(t.name)}</h2>
     <p class="muted">이 방에서 누구세요? 고르면 이 기기에 기억해 둘게요.</p>
-    <div class="chips">${t.participants.map((p) => `<button class="chip" data-pid="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
+    <div class="chips">${humans(t).map((p) => `<button class="chip" data-pid="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
     <form class="row" id="newme" style="margin-top:16px">
       <input class="input grow" name="n" maxlength="30" placeholder="목록에 없으면 이름 입력">
       <button class="btn primary">참여</button></form>`, (el, scrim) => {
@@ -1081,6 +1111,108 @@ function tidySheet(t) {
 // ───────── 카드 명세서로 맞추기 ─────────
 // 외화 지출을 실제 카드 청구액(정산 통화)으로 한 화면에서 맞춘다 — 해외여행 정산의 마지막 단계
 const foreignExpenses = (t) => t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && e.currency !== t.baseCurrency);
+// ───────── 공금(회비) ─────────
+// 걷은 돈 = 멤버→공금 송금, 쓴 돈 = 공금이 낸 지출, 돌려준 돈 = 공금→멤버 송금
+function potStats(t) {
+  const pot = potOf(t);
+  if (!pot) return null;
+  const B = t.baseCurrency;
+  let got = 0, spent = 0, back = 0;
+  for (const e of t.expenses) {
+    if (e.deletedAt) continue;
+    let v; try { v = expenseBaseMinor(e, B); } catch { continue; }
+    if (e.kind === 'transfer') {
+      if (e.shares[0]?.pid === pot.id) got += v;
+      else if (e.payerId === pot.id) back += v;
+    } else if (e.payerId === pot.id) spent += v;
+  }
+  return { pot, got, spent, back, left: got - spent - back };
+}
+function potCard(t) {
+  const st = potStats(t);
+  if (!st) return '';
+  const B = t.baseCurrency;
+  return `<div class="card pot-card">
+    <div class="row between"><b>💰 공금</b><span class="num pot-left ${st.left < 0 ? 'minus' : ''}">${st.left < 0 ? '모자람 ' : '남은 돈 '}${fmt(Math.abs(st.left), B)}</span></div>
+    <p class="muted small">걷은 돈 ${fmt(st.got, B)} · 공금으로 쓴 돈 ${fmt(st.spent, B)}${st.back ? ` · 돌려준 돈 ${fmt(st.back, B)}` : ''}</p>
+    <p class="muted small">지출을 적을 때 '누가 냈나요?'에서 <b>${POT_NAME}</b>을 고르면 공금에서 나가요. 남거나 모자란 공금은 정산에 같이 계산돼요.</p>
+    <button class="btn block" data-pot-dues>회비 걷기</button>
+  </div>`;
+}
+function potOffer(t) {
+  if (isSolo(t) || humans(t).length < 2) return '';
+  return `<div class="card pot-offer" style="margin-top:12px"><b>💰 공금(회비)으로 같이 쓰나요?</b>
+    <p class="muted small">미리 돈을 걷어 공금으로 쓰면, 공금으로 낸 지출과 각자 낸 지출을 같이 계산해서 남은 공금을 누구에게 얼마 돌려줄지까지 정리해 드려요.</p>
+    <button class="btn block" data-pot-make>공금 만들기</button></div>`;
+}
+function bindPotCard(body, t) {
+  body.querySelectorAll('[data-pot-dues]').forEach((b) => { b.onclick = () => duesSheet(t); });
+  body.querySelectorAll('[data-pot-make]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const p = await store.addParticipant(t.id, POT_NAME);
+        // 새 지출의 기본 대상에서 빠지게(excluded) — 공금은 몫이 없다
+        await store.updateParticipant(t.id, p.id, { payInfo: { pot: true }, excluded: true });
+        view.trip = await store.getTrip(t.id);
+        renderTrip();
+        duesSheet(view.trip);
+      } catch (err) { b.disabled = false; report(err); }
+    };
+  });
+}
+function duesSheet(t) {
+  const pot = potOf(t);
+  if (!pot) return;
+  const B = t.baseCurrency;
+  const people = humans(t).filter((p) => !p.excluded);
+  openSheet(`
+    <h2>💰 회비 걷기</h2>
+    <p class="muted small">각자 공금에 낸 돈을 적어요. 같은 금액이면 위 칸만 넣으세요. 회비는 ${B}로 적고, 나중에 더 걷으면 다시 적으면 돼요.</p>
+    <form id="duesf" class="stack">
+      <label class="fx-row"><span>1인당</span><input class="input num" name="each" inputmode="decimal" autocomplete="off" placeholder="예: 300,000"><span class="muted">${B}</span></label>
+      <div class="dues-list">${people.map((pp) => `<label class="fx-row"><span class="grow">${esc(pp.name)}</span>
+        <input class="input num" name="d_${esc(pp.id)}" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${esc(pp.name)} 회비"></label>`).join('')}</div>
+      <label class="field date-row"><span>날짜</span><input class="input" type="date" name="date" value="${today()}"></label>
+      <p class="muted small" id="dues-sum"></p>
+      <div class="row"><button type="button" class="btn grow" id="dues-close">닫기</button><button class="btn primary grow">적기</button></div>
+    </form>`, (el) => {
+    const f = el.querySelector('#duesf');
+    const vals = () => people.map((pp) => ({ p: pp, v: parseAmount(f[`d_${pp.id}`].value) || 0 })).filter((x) => x.v > 0);
+    const sum = () => {
+      const xs = vals();
+      el.querySelector('#dues-sum').textContent = xs.length ? `${xs.length}명 · 합계 ${fmtMajor(xs.reduce((a, x) => a + x.v, 0), B)}` : '';
+    };
+    f.each.oninput = () => {
+      const v = f.each.value;
+      people.forEach((pp) => { f[`d_${pp.id}`].value = v; });
+      sum();
+    };
+    people.forEach((pp) => { f[`d_${pp.id}`].oninput = sum; });
+    el.querySelector('#dues-close').onclick = closeSheet;
+    f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const xs = vals();
+      if (!xs.length) return toast('회비를 한 명 이상 적어 주세요');
+      const btn = f.querySelector('.btn.primary');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        for (const x of xs) {
+          await store.addExpense(t.id, {
+            kind: 'transfer', title: `공금 회비 ${x.p.name}`, date: f.date.value || today(),
+            amount: x.v, currency: B, rate: null, baseOverride: null,
+            payerId: x.p.id, shares: [{ pid: pot.id, w: 1 }],
+          });
+        }
+        view.trip = await store.getTrip(t.id);
+        closeSheet(); renderTrip();
+        toast(`회비 ${xs.length}명을 적었어요. 이제 공금으로 낸 지출은 '누가 냈나요?'에서 ${POT_NAME}을 고르세요`);
+      } catch (err) { btn.disabled = false; report(err); }
+    };
+  });
+}
+
 // ───────── 환전 기록 (012) ─────────
 // 포린트·코루나를 미리 환전(트래블카드 충전 포함)해 쓰면, 그 현금으로 낸 지출은 내가 받은 환율로 계산한다.
 // 환전은 지출이 아니다 — 지출의 환율 칸에 환전 환율이 들어갈 뿐이라 정산 계산·이전 앱은 그대로다.
@@ -1266,7 +1398,8 @@ function expenseSheet(exp) {
     // 새 지출 기본값: "이후 제외"된 사람은 빼고, 각자의 기본 몫(커플 2 등)을 쓴다
     shares: t.participants.filter((p) => !p.excluded).map((p) => ({ pid: p.id, w: p.defaultW ?? 1 })),
   };
-  const people = t.participants;
+  const people = humans(t); // 나눌 사람 — 공금은 몫이 없다
+  const payers = [...t.participants].sort((a, b) => (isPot(b) ? 1 : 0) - (isPot(a) ? 1 : 0)); // 낸 사람 — 공금을 맨 앞에
   const st = {
     payerId: e.payerId,
     mode: splitModeOf(e.shares),
@@ -1310,7 +1443,7 @@ function expenseSheet(exp) {
       <p class="summary-line ${isSolo(t) ? 'hidden' : ''}" id="summary"></p>
       <div id="payer-pick" class="card panel hidden">
         <span class="muted small">누가 냈나요?</span>
-        <div class="chips">${people.map((p) => `<button type="button" class="chip" data-payer="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
+        <div class="chips">${payers.map((p) => `<button type="button" class="chip" data-payer="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
       </div>
       <div id="split" class="card panel hidden">
         <div class="seg small-seg" role="radiogroup" aria-label="나누는 방식">

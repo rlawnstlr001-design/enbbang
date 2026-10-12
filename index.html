@@ -20,10 +20,10 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23FF7A1A'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='800'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=202610121037">
+  <link rel="stylesheet" href="styles.css?v=202610121043">
   <!-- Supabase 클라이언트(package-lock 버전 고정, UMD → window.supabase). CDN 최신판을 받지 않아 갑자기 깨지거나 해외 약한 망에서 멈추지 않게 -->
-  <script src="js/supabase.js?v=202610121037"></script>
-  <script src="config.js?v=202610121037"></script>
+  <script src="js/supabase.js?v=202610121043"></script>
+  <script src="config.js?v=202610121043"></script>
   <script>
     // 소개 페이지는 웹에서 주소만 열었을 때만(#how 같은 쪽 안 이동 포함). 앱 안이거나 #/… 링크면 바로 앱 화면 (깜빡임 방지)
     if (location.hash.startsWith('#/') || window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.remove('landing');
@@ -190,6 +190,7 @@
       <h2 class="lp-h">트립N빵으로 할 수 있는 것</h2>
       <div class="lp-grid">
         <article><h3>여러 나라 통화를 한 방에</h3><p>유로·파운드·코루나·포린트·즐로티처럼 나라를 옮길 때마다 바뀌는 통화를 지출마다 골라 적으면, 정산은 원화 한 번으로 끝나요. 미리 환전한 현금은 환전 기록을 적어 두면 내가 받은 환율로 계산해요.</p></article>
+        <article><h3>공금(회비)도 같이</h3><p>미리 걷은 회비로 낸 지출과 각자 낸 지출을 함께 계산해서, 남은 공금을 누구에게 얼마 돌려줄지까지 정리해요.</p></article>
         <article><h3>혼자 여행은 가계부로</h3><p>정산할 사람이 없으면 '혼자 가계부'로 만들어요. 날짜별 표와 분류별 합계를 보고, 표를 복사해 엑셀이나 구글 시트에 붙여 넣어요.</p></article>
         <article><h3>최소 송금 계산</h3><p>각자 낸 돈과 몫의 차이로 송금 횟수가 가장 적은 방법을 찾아요. 낸 사람에게 바로 보내는 방식도 골라요.</p></article>
         <article><h3>카드 명세서로 맞추기</h3><p>나중에 청구된 원화를 넣으면 그 지출만 고쳐서 다시 계산해요.</p></article>
@@ -226,6 +227,6 @@
   <div id="app" aria-live="polite"><div class="boot">불러오는 중…</div></div>
   <div id="sheet-root"></div>
   <div id="toast" role="status"></div>
-  <script type="module" src="js/app.js?v=202610121037"></script>
+  <script type="module" src="js/app.js?v=202610121043"></script>
 </body>
 </html>

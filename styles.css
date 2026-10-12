@@ -463,3 +463,10 @@ html.landing body { background: #FFFFFF; }
 .fx-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
 .fx-item .num { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
 .list-tools { justify-content: flex-end; margin-bottom: 8px; }
+
+/* 공금(회비) */
+.pot-card { margin-bottom: 12px; border: 2px solid var(--accent-soft); }
+.pot-card p { margin: 6px 0 0; }
+.pot-card .btn { margin-top: 10px; }
+.pot-left { font-weight: 800; }
+.dues-list { display: grid; gap: 8px; }
