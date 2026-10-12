@@ -2,19 +2,20 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency,
-} from './settle.js?v=202610121004';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121004';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121004';
+} from './settle.js?v=202610121011';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121011';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121011';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610121004';
+} from './share.js?v=202610121011';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610121004';
+} from './native.js?v=202610121011';
 
-const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD',
-  'IDR', 'MYR', 'CAD', 'CHF', 'NZD'];
+// 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
+const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
+  'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'AUD', 'IDR', 'MYR', 'CAD', 'NZD'];
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet-root');
 
@@ -103,7 +104,7 @@ document.addEventListener('visibilitychange', () => {
 
 // 환율 입력 단위 — 엔은 10엔, 동·루피아·원은 1,000 기준으로 받는다 (사용자 결정 10/6: "10엔 = 91원").
 // 저장은 늘 1단위 환율이라 정산 계산·서버는 그대로다.
-const RATE_UNIT = { JPY: 10, VND: 1000, IDR: 1000, KRW: 1000 };
+const RATE_UNIT = { JPY: 10, VND: 1000, IDR: 1000, KRW: 1000, HUF: 100 };
 const rateUnit = (c) => RATE_UNIT[c] || 1;
 // 화면에 보이는 환율: 1 이상이면 소수 둘째 자리까지, 작으면 유효숫자 4자리
 const tidy = (x) => (Number(x) >= 1 ? Math.round(Number(x) * 100) / 100 : Number(Number(x).toPrecision(4)));
@@ -164,9 +165,10 @@ function renderLanding() {
   initLandingCalc();
 }
 
-// 첫 화면 계산기 — 예시 지출(엔화) 켜고 끄기 + 직접 더하기 + 인원 → 1인당 원화. 환율은 앱과 같은 참고 환율(실패하면 예시 값)
+// 첫 화면 계산기 — 예시 지출(유로·코루나·포린트) 켜고 끄기 + 직접 더하기 + 인원 → 1인당 원화. 환율은 앱과 같은 참고 환율(실패하면 예시 값)
 const LP_FALLBACK = { KRW: 1, JPY: 9.1, USD: 1390, EUR: 1610, TWD: 43, VND: 0.054, THB: 39, PHP: 24, CNY: 192, HKD: 178, SGD: 1070, GBP: 1850, AUD: 900,
-  IDR: 0.085, MYR: 310, CAD: 1000, CHF: 1700, NZD: 820 };
+  IDR: 0.085, MYR: 310, CAD: 1000, CHF: 1700, NZD: 820,
+  CZK: 64, HUF: 4.1, PLN: 375, DKK: 216, SEK: 145, NOK: 135, ISK: 11, RON: 320, TRY: 33 };
 let lpCalcBound = false;
 // 환율 날짜 "06 Oct 2026" → "10/6"
 const lpDate = (s) => { const d = new Date(s); return isNaN(d) ? s : `${d.getMonth() + 1}/${d.getDate()}`; };
@@ -183,7 +185,7 @@ function initLandingCalc() {
     let total = 0;
     $f.querySelectorAll('.lp-item input').forEach((cb) => {
       cb.closest('.lp-item').classList.toggle('off', !cb.checked);
-      if (cb.checked) total += Number(cb.dataset.yen) * rateOf('JPY');
+      if (cb.checked) total += Number(cb.dataset.amt) * rateOf(cb.dataset.cur);
     });
     const cur = $cur.value;
     total += (Number($extra.value.replace(/[^0-9]/g, '')) || 0) * rateOf(cur);
@@ -192,10 +194,11 @@ function initLandingCalc() {
     $f.querySelector('#lp-people').textContent = `${st.people}명`;
     $f.querySelector('#lp-dec').disabled = st.people <= 2;
     $f.querySelector('#lp-inc').disabled = st.people >= 20;
-    const c = cur === 'KRW' ? 'JPY' : cur;
-    const unit = rateUnit(c);
-    const live = st.live[c] != null;
-    $f.querySelector('#lp-rate').innerHTML = `${live ? '참고 환율' : '예시 환율'} ${unit.toLocaleString('ko-KR')} ${c} = ${won(rateOf(c) * unit)}원`
+    // 예시 지출의 통화들 + 직접 더한 통화 — 나라마다 다른 통화가 한 번에 원화로 모이는 걸 보여 준다
+    const curs = [...new Set([...[...$f.querySelectorAll('.lp-item input')].map((cb) => cb.dataset.cur), cur])].filter((c) => c !== 'KRW');
+    const live = curs.every((c) => st.live[c] != null);
+    $f.querySelector('#lp-rate').innerHTML = `${live ? '참고 환율' : '예시 환율'} `
+      + curs.map((c) => `${rateUnit(c).toLocaleString('ko-KR')} ${c} = ${won(rateOf(c) * rateUnit(c))}원`).join(' · ')
       + (live && st.date ? ` (${esc(lpDate(st.date))} 기준)` : '')
       + ' · 여행방에서는 참고 환율이 자동으로 채워지고, 카드에 찍힌 원화로 고칠 수 있어요.'
       + (live ? ` <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${esc(RATE_ATTRIBUTION.text)}</a>` : '');
@@ -212,11 +215,11 @@ function initLandingCalc() {
     $extra.value = n ? Number(n).toLocaleString('ko-KR') : '';
     draw();
   });
-  $cur.addEventListener('change', () => fetchRate($cur.value));
+  $cur.addEventListener('change', () => { fetchRate($cur.value); draw(); });
   $f.querySelector('#lp-dec').addEventListener('click', () => { st.people = Math.max(2, st.people - 1); draw(); });
   $f.querySelector('#lp-inc').addEventListener('click', () => { st.people = Math.min(20, st.people + 1); draw(); });
   draw();
-  fetchRate('JPY');
+  $f.querySelectorAll('.lp-item input').forEach((cb) => fetchRate(cb.dataset.cur)); // 환율표는 한 번만 받아 온다(rates.js 캐시)
 }
 
 // ───────── 홈 ─────────
@@ -241,7 +244,7 @@ function renderHome() {
         <button type="button" role="radio" data-kind="solo" aria-checked="false">🧳 혼자 가계부</button>
       </div>
       <label class="field"><span>여행 이름</span>
-        <input class="input" name="name" maxlength="60" placeholder="예: 10월 오사카 3박4일" required></label>
+        <input class="input" name="name" maxlength="60" placeholder="예: 10월 유럽 7박8일" required></label>
       <p class="muted small hidden" id="solo-note">혼자 쓴 돈을 날짜·분류별 표로 정리해 드려요. 나중에 같이 쓰게 되면 사람을 추가해 정산할 수 있어요.</p>
       <div class="field" id="members-field"><span>함께 가는 사람</span>
         <div class="chips members" id="members"></div>
@@ -255,12 +258,6 @@ function renderHome() {
     </form>
     ${recent.length ? `<div class="card recent" style="margin-top:16px"><b>최근 여행방</b>
       ${recent.map((t) => `<a href="#/t/${esc(t.id)}"><span>${esc(t.name)}</span><span class="muted small">${new Date(t.at).toLocaleDateString('ko-KR')}</span></a>`).join('')}</div>` : ''}
-    <div class="card prep">
-      <b>✈️ 출발 전 준비</b>
-      <p class="small">데이터 eSIM은 <a href="https://usimsa.com/affiliate/3061" target="_blank" rel="noopener sponsored" data-prep="usimsa">유심사</a>에서 미리 살 수 있어요. 목적지·기간에 맞는 상품인지 확인하고 고르세요.
-        <span class="muted">(제휴 링크: 이 링크로 구매하면 트립N빵 운영자가 판매 수수료를 받아요)</span></p>
-      <p class="small">입국 서류·환전은 운영자 블로그 <a href="https://blog.naver.com/solo_os" target="_blank" rel="noopener" data-prep="blog">여행 실무 노트</a>, 여행지별 정산 방법은 <a href="${isApp ? SITE : './'}guide/" ${isApp ? 'target="_blank" rel="noopener"' : ''} data-prep="guide">여행지별 정산 안내</a>에 있어요.</p>
-    </div>
     <p class="muted small" style="margin-top:24px">${store.mode === 'cloud'
       ? '링크를 받은 사람은 누구나 이 방을 보고 입력할 수 있어요. 방은 마지막 사용 후 90일 뒤 정리돼요.'
       : '로컬 모드: 이 기기에만 저장돼요. 공유 링크에는 그 시점의 내용이 담겨요.'}
@@ -312,7 +309,6 @@ function renderHome() {
     $app.querySelector('#create-btn').textContent = solo ? '가계부 만들기' : '여행방 만들기';
   };
   $app.querySelectorAll('[data-kind]').forEach((b) => { b.onclick = () => setKind(b.dataset.kind); });
-  $app.querySelectorAll('[data-prep]').forEach((a) => a.addEventListener('click', () => store.logEvent(null, 'prep_link', { kind: a.dataset.prep })));
 
   $app.querySelector('#create').onsubmit = async (e) => {
     e.preventDefault();
@@ -1190,7 +1186,7 @@ function expenseSheet(exp) {
         <input class="input amount num" name="amount" inputmode="decimal" autocomplete="off" value="${esc(e.amount)}" placeholder="0" aria-label="금액" required>
         <select class="input cur" name="currency" aria-label="통화">${CURRENCIES.map((c) => `<option ${c === e.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>
       </div>
-      <input class="input" name="title" maxlength="100" value="${esc(e.title)}" placeholder="어디에 썼나요? 예: 저녁 이자카야" aria-label="내용" required>
+      <input class="input" name="title" maxlength="100" value="${esc(e.title)}" placeholder="어디에 썼나요? 예: 루브르 박물관" aria-label="내용" required>
       <div class="cats" role="radiogroup" aria-label="카테고리">${CATEGORIES.map((c) =>
         `<button type="button" class="cat" role="radio" data-cat="${c.id}"><span>${c.emoji}</span>${c.label}</button>`).join('')}</div>
       <div class="receipt-row">

@@ -304,7 +304,8 @@ html.landing body { background: #FFFFFF; }
 .lp-item i { font-style: normal; flex: none; font-weight: 900; font-size: 12px; color: var(--orange-ink); }
 .lp-item.sky i { color: var(--sky-ink); }
 .lp-item span { flex: 1; min-width: 0; font-weight: 700; font-size: 15px; }
-.lp-item b { flex: none; font-weight: 900; font-size: 15px; font-variant-numeric: tabular-nums; }
+.lp-item b { flex: none; font-weight: 900; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lp-item i small { display: block; font-size: 11px; font-weight: 700; opacity: .8; }
 .lp-item.off span, .lp-item.off b { text-decoration: line-through; }
 .lp-calc-field { display: flex; flex-direction: column; gap: 6px; }
 .lp-calc-input { display: flex; align-items: stretch; gap: 8px; border: 2px solid var(--line); border-radius: 16px; padding: 4px 4px 4px 14px; }
@@ -440,9 +441,6 @@ html.landing body { background: #FFFFFF; }
 /* 정산 이미지 보기 */
 .share-img { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; margin: 10px 0; background: var(--surface-2); }
 .sheet:focus { outline: none; }
-/* 여행 준비 안내 (유심사 제휴·운영자 블로그·여행지별 안내) */
-.prep { margin-top: 16px; }
-.prep p { margin: 6px 0 0; }
 
 /* 혼자 쓰는 가계부 — 날짜별 소계 표 (10/12) */
 #create > .seg { margin-bottom: 4px; }
