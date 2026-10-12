@@ -1,6 +1,6 @@
 // 공유 — 로컬 모드 스냅샷 링크 / 카톡 붙여넣기용 텍스트 / 세로 이미지 카드 / 송금 링크
 
-import { fromMinor } from './settle.js?v=202610121235';
+import { fromMinor } from './settle.js?v=202610121237';
 
 // ───── 스냅샷 (로컬 모드 전용: 링크 안에 방 전체를 압축해 담는다) ─────
 const b64url = {
@@ -140,6 +140,64 @@ export async function settlementImage(trip, result, nameOf) {
   }
   g.fillStyle = '#A8977F'; g.font = font(500, 22);
   g.fillText('트립N빵 — 링크 하나로 여행 정산', pad, H - 48);
+  return new Promise((res) => c.toBlob(res, 'image/png'));
+}
+
+// ───── 여행 요약 카드 (인스타·카톡 공유용 1080×1350) ─────
+// 이름·송금 정보는 넣지 않는다(밖으로 퍼지는 이미지). 사실 숫자만: 일수·통화·건수·총액·평균·분류.
+export async function tripSummaryImage(d) {
+  const W = 1080, H = 1350, pad = 84;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const font = (w, s) => `${w} ${s}px "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
+  const fit = (text, w, s, max) => { // 긴 여행 이름은 글자 크기를 줄여 한 줄에
+    let size = s;
+    g.font = font(w, size);
+    while (g.measureText(text).width > max && size > 36) { size -= 4; g.font = font(w, size); }
+    return size;
+  };
+  g.fillStyle = '#FFF8EC'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#FF7A1A'; g.fillRect(0, 0, W, 18);
+  g.fillStyle = '#E2560B'; g.font = font(800, 34); g.fillText('🧳 여행 요약', pad, 130);
+  g.fillStyle = '#1F1A14'; fit(d.name, 900, 72, W - 2 * pad); g.fillText(d.name, pad, 230);
+  g.fillStyle = '#7A6A58'; g.font = font(600, 36);
+  g.fillText([d.days ? `${d.days}일` : '', d.curs.length > 1 ? `통화 ${d.curs.length}개` : '', `지출 ${d.count}건`].filter(Boolean).join(' · '), pad, 300);
+  // 큰 숫자 두 개
+  const box = (x, label, value) => {
+    g.fillStyle = '#FFFFFF'; roundRect(g, x, 360, (W - 2 * pad - 30) / 2, 200, 32); g.fill();
+    g.fillStyle = '#7A6A58'; g.font = font(600, 32); g.fillText(label, x + 36, 430);
+    g.fillStyle = '#1F1A14'; fit(value, 900, 60, (W - 2 * pad - 30) / 2 - 72); g.fillText(value, x + 36, 515);
+  };
+  box(pad, '총 지출', fmt(d.total, d.base));
+  box(pad + (W - 2 * pad + 30) / 2, d.avgLabel, fmt(d.avg, d.base));
+  // 통화 칩
+  let y = 650;
+  if (d.curs.length > 1) {
+    let x = pad;
+    g.font = font(800, 34);
+    for (const cur of d.curs) {
+      const w = g.measureText(cur).width + 48;
+      g.fillStyle = '#FFE7D1'; roundRect(g, x, y - 46, w, 64, 32); g.fill();
+      g.fillStyle = '#B4470C'; g.fillText(cur, x + 24, y);
+      x += w + 16;
+      if (x > W - pad - 160) break;
+    }
+    y += 80;
+  }
+  // 어디에 썼나 (상위 4개)
+  g.fillStyle = '#1F1A14'; g.font = font(800, 40); g.fillText('어디에 썼나요', pad, y + 20);
+  y += 90;
+  for (const cat of d.cats.slice(0, 4)) {
+    g.fillStyle = '#1F1A14'; g.font = font(700, 36); g.fillText(`${cat.emoji} ${cat.label}`, pad, y);
+    const s = `${cat.pct}%`;
+    g.fillStyle = '#7A6A58'; g.fillText(s, W - pad - g.measureText(s).width, y);
+    g.fillStyle = '#F3E6D3'; roundRect(g, pad + 260, y - 26, W - 2 * pad - 400, 22, 11); g.fill();
+    g.fillStyle = '#FF7A1A'; roundRect(g, pad + 260, y - 26, Math.max(22, (W - 2 * pad - 400) * cat.pct / 100), 22, 11); g.fill();
+    y += 86;
+  }
+  g.fillStyle = '#A8977F'; g.font = font(600, 30);
+  g.fillText('트립N빵으로 정리했어요 · tripnbbang.com', pad, H - 80);
   return new Promise((res) => c.toBlob(res, 'image/png'));
 }
 

@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610121235';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121235';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121235';
+} from './settle.js?v=202610121237';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121237';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121237';
 import {
-  encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610121235';
+  encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
+} from './share.js?v=202610121237';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610121235';
+} from './native.js?v=202610121237';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -624,6 +624,7 @@ function renderSettle(body, t, result) {
       <button class="btn primary grow" id="share-text">카톡용 복사</button>
       <button class="btn grow" id="share-img">이미지로 공유</button>
     </div>
+    ${result.totalSpent ? '<button class="btn ghost block" data-summary style="margin-top:8px">🧳 여행 요약 카드 만들기</button>' : ''}
     ${pot ? '' : potOffer(t)}
     ${exchangeCard(t)}
     ${catCard(t, result.totalSpent)}
@@ -735,6 +736,7 @@ function renderSettle(body, t, result) {
   body.querySelector('#stmt-open')?.addEventListener('click', () => statementSheet(t));
   bindExchangeCard(body, t);
   bindPotCard(body, t);
+  bindSummary(body, t);
   body.querySelector('#share-text').onclick = async () => {
     copy(settlementText(t, shown, (pid) => nameOf(t, pid), await tripLink(t)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
     store.logEvent(t.id, 'settle_shared', { via: 'text' });
@@ -818,6 +820,7 @@ function renderBook(body, t) {
     </div>
     ${exchangeCard(t)}
     ${catCard(t, total)}
+    <button class="btn ghost block" data-summary style="margin-top:12px">🧳 여행 요약 카드 만들기</button>
     ${soloAddCard(t)}`;
   body.querySelectorAll('[data-eid]').forEach((el) => {
     el.onclick = () => expenseSheet(t.expenses.find((e) => e.id === el.dataset.eid));
@@ -834,6 +837,7 @@ function renderBook(body, t) {
   };
   bindExchangeCard(body, t);
   bindBudget(body, t);
+  bindSummary(body, t);
   bindSoloAdd(body, t);
 }
 
@@ -1115,6 +1119,40 @@ function tidySheet(t) {
 // ───────── 카드 명세서로 맞추기 ─────────
 // 외화 지출을 실제 카드 청구액(정산 통화)으로 한 화면에서 맞춘다 — 해외여행 정산의 마지막 단계
 const foreignExpenses = (t) => t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && e.currency !== t.baseCurrency);
+// ───────── 여행 요약 카드 (공유 이미지) ─────────
+// 이름은 넣지 않는다 — 인스타처럼 밖으로 퍼지는 이미지라 숫자만
+function summaryData(t) {
+  const r = settle(t);
+  const spends = t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer');
+  const curs = [...new Set(spends.map((e) => e.currency))].sort((a, b) => (a === t.baseCurrency ? -1 : b === t.baseCurrency ? 1 : 0));
+  const days = spanDays(t);
+  const people = humans(t).length;
+  const solo = isSolo(t);
+  const cats = categoryTotals(t).map((c) => ({ ...c, pct: r.totalSpent ? Math.round((c.total / r.totalSpent) * 100) : 0 }));
+  return {
+    name: t.name, base: t.baseCurrency, days, curs, count: spends.length, total: r.totalSpent, cats,
+    avgLabel: solo ? '하루 평균' : `1인 평균 (${people}명)`,
+    avg: solo ? (days ? Math.round(r.totalSpent / days) : r.totalSpent) : Math.round(r.totalSpent / Math.max(people, 1)),
+  };
+}
+function bindSummary(body, t) {
+  body.querySelectorAll('[data-summary]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const blob = await tripSummaryImage(summaryData(t));
+        const file = new File([blob], `${t.name}-여행요약.png`, { type: 'image/png' });
+        store.logEvent(t.id, 'settle_shared', { via: 'summary' });
+        if (await nativeShareImage(blob, `${t.id}-summary.png`, `${t.name} 여행 요약`)) return;
+        if (navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file], title: `${t.name} 여행 요약` }); return; } catch { /* 취소 → 미리보기로 */ }
+        }
+        showShareImage(blob, file.name, '여행 요약 카드');
+      } catch (err) { report(err); } finally { b.disabled = false; }
+    };
+  });
+}
+
 // ───────── 예산 (이 폰에만 저장) ─────────
 // 개인 예산이라 서버에 올리지 않는다 — 친구에게 안 보이고, 송금 정보 변경 경고(payChangedAt)도 건드리지 않는다.
 // 같이 가는 방은 '내 몫'(정산 계산의 owed) 기준, 혼자 가계부는 총 지출 기준.
@@ -1914,11 +1952,11 @@ addEventListener('touchend', (e) => {
 
 // 정산 이미지 보기 — 공유창이 없는 브라우저(카톡 안 브라우저 등)는 내려받기도 막혀 있어서 눌러도 반응이 없었다 (10/7)
 // 이미지를 화면에 띄우고 "길게 눌러 저장"을 안내한다. 내려받기가 되는 PC 브라우저는 저장 버튼도 같이
-async function showShareImage(blob, name) {
+async function showShareImage(blob, name, title = '정산 이미지') {
   const url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(blob); });
   const inApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent);
-  openSheet(`<h3>정산 이미지</h3>
-    <img class="share-img" src="${url}" alt="정산 결과 이미지">
+  openSheet(`<h3>${esc(title)}</h3>
+    <img class="share-img" src="${url}" alt="${esc(title)}">
     <p class="muted small">${inApp ? '이미지를 <b>길게 눌러</b> 저장한 뒤 단톡방에 보내 주세요.' : '이미지를 길게 누르거나 아래 버튼으로 저장해 단톡방에 보내 주세요.'}</p>
     <div class="row">${inApp ? '' : `<a class="btn primary grow" href="${url}" download="${esc(name)}">이미지 저장</a>`}
       <button class="btn grow" id="img-close">닫기</button></div>`, (el) => {
