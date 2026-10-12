@@ -453,3 +453,13 @@ html.landing body { background: #FFFFFF; }
 .book-day th, .book-day td { background: var(--surface-2); font-weight: 700; font-size: 13px; }
 .book-table tbody tr[data-eid] { cursor: pointer; }
 .book-table tfoot th, .book-table tfoot td { font-weight: 800; border-bottom: 0; padding-top: 12px; }
+
+/* 환전 기록 (012) */
+.fx-src { margin-bottom: 8px; }
+.fx-src .chip[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.fx-card { margin-top: 12px; }
+.fx-card p { margin: 6px 0 10px; }
+.fx-list { display: grid; gap: 8px; }
+.fx-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.fx-item .num { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+.list-tools { justify-content: flex-end; margin-bottom: 8px; }

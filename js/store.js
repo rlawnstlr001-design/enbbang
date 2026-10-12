@@ -6,7 +6,7 @@
 //          expenses: [{ id, title, date, amount, currency, rate, baseOverride,
 //                       payerId, shares: [{ pid, w }], device, createdAt, deletedAt }] }
 
-import { tidyTrip } from './settle.js?v=202610121013';
+import { tidyTrip } from './settle.js?v=202610121037';
 
 const LS = {
   get(k, d = null) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -141,6 +141,19 @@ export class LocalStore {
     this.#save(t);
   }
   async deleteExpense(id, eid) { return this.updateExpense(id, eid, { deletedAt: new Date().toISOString() }); }
+  // 환전 기록 (012) — 지출이 아니라 따로 둔다
+  async addExchange(id, ex) {
+    const t = this.#load(id);
+    const x = { ...ex, id: uid(8), mine: true, createdAt: new Date().toISOString() };
+    (t.exchanges ||= []).push(x);
+    this.#save(t);
+    return x;
+  }
+  async deleteExchange(id, xid) {
+    const t = this.#load(id);
+    t.exchanges = (t.exchanges || []).filter((x) => x.id !== xid);
+    this.#save(t);
+  }
   async markSettled(id, on = true) {
     const t = this.#load(id);
     t.settledAt = on ? new Date().toISOString() : null;
@@ -307,6 +320,16 @@ export class CloudStore {
     return this.#flushing;
   }
   async deleteExpense(id, eid) { return this.updateExpense(id, eid, { deletedAt: new Date().toISOString() }); }
+  // 환전 기록 (012) — 오프라인 대기열은 쓰지 않는다(연결됐을 때만). 적은 기기나 총무만 지울 수 있다
+  async addExchange(id, ex) {
+    const r = await this.#rpc('enb_add_exchange', { p_trip: id, p_ex: ex, p_device: deviceId() });
+    this.#ping(id);
+    return r;
+  }
+  async deleteExchange(id, xid) {
+    await this.#rpc('enb_delete_exchange', { p_trip: id, p_id: xid, p_device: deviceId(), p_admin: me.adminKey(id) || '' });
+    this.#ping(id);
+  }
   async markSettled(id, on = true) {
     await this.#rpc('enb_mark_settled', { p_trip: id, p_on: on, p_admin: me.adminKey(id) || '' });
     this.#ping(id);

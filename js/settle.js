@@ -82,7 +82,20 @@ export function tidyTrip(trip) {
       ? e.shares.filter((s) => s && typeof s.pid === 'string').map((s) => ({ ...s, w: Number(s.w) }))
       : [],
   }));
-  return { ...trip, participants, expenses };
+  // 환전 기록(012) — 금액이 숫자이고 0보다 큰 것만. 이전 서버·로컬 방엔 없다
+  const exchanges = (Array.isArray(trip.exchanges) ? trip.exchanges : []).filter((x) => x && x.id)
+    .map((x) => ({ ...x, currency: String(x.currency || '').toUpperCase(), amount: Number(x.amount), baseAmount: Number(x.baseAmount) }))
+    .filter((x) => x.amount > 0 && x.baseAmount > 0 && /^[A-Z]{3}$/.test(x.currency));
+  return { ...trip, participants, expenses, exchanges };
+}
+
+// 환전 환율: 그 통화로 환전한 기록을 모두 합쳐 "외화 1단위 = 정산 통화 몇" (여러 번 환전했으면 가중 평균).
+// 지출 rate와 같은 뜻이라 그대로 넣으면 된다. 기록이 없으면 null
+export function exchangeRate(trip, cur) {
+  const xs = (trip.exchanges || []).filter((x) => x.currency === cur);
+  const got = xs.reduce((s, x) => s + Number(x.amount), 0);
+  const paid = xs.reduce((s, x) => s + Number(x.baseAmount), 0);
+  return got > 0 && paid > 0 ? Number((paid / got).toPrecision(8)) : null;
 }
 
 // 계산에 쓸 수 있는 지출인지 — 금액·환율이 숫자이고 나눌 사람이 있어야 한다

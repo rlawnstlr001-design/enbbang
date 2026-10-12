@@ -1,17 +1,17 @@
 // 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
-  transferKey, brokenExpenses, guessCurrency,
-} from './settle.js?v=202610121013';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121013';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121013';
+  transferKey, brokenExpenses, guessCurrency, exchangeRate,
+} from './settle.js?v=202610121037';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121037';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121037';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610121013';
+} from './share.js?v=202610121037';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610121013';
+} from './native.js?v=202610121037';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -468,6 +468,7 @@ function renderList(body, t) {
     ${broken.size ? `<div class="card broken-card" role="status"><b>⚠️ 정산에서 뺀 지출 ${broken.size}건</b>
       <p class="small">금액·환율·나눌 사람 중 비어 있는 게 있어요. 아래 <b>계산 제외</b> 표시된 지출을 눌러 고쳐 주세요.</p></div>` : ''}
     ${inviteCard(t, spends.length)}
+    ${fxUsed(t) ? `<div class="row list-tools"><button type="button" class="btn sm ghost" data-fx-open>💱 환전 기록${t.exchanges.length ? ` ${t.exchanges.length}건` : ''}</button></div>` : ''}
     ${live.length > 4 ? `<input class="input" id="q" type="search" placeholder="검색 (내용·낸 사람)" value="${esc(view.q)}">` : ''}
     ${curLine}
     ${!spends.length ? `<div class="empty">아직 지출이 없어요.<br>아래 <b>＋ 지출</b>로 첫 항목을 넣어 보세요.</div>` : ''}
@@ -508,6 +509,7 @@ function renderList(body, t) {
     el.onclick = () => undoTransfer(t, el.dataset.tid);
   });
   bindInviteCard(body, t);
+  bindExchangeCard(body, t);
 }
 
 // 초대 카드: 방을 막 만들었거나, 아직 안 들어온 멤버가 있고 지출이 적을 때 맨 위에
@@ -600,6 +602,7 @@ function renderSettle(body, t, result) {
       <button class="btn primary grow" id="share-text">카톡용 복사</button>
       <button class="btn grow" id="share-img">이미지로 공유</button>
     </div>
+    ${exchangeCard(t)}
     ${catCard(t, result.totalSpent)}
     <details class="card" style="margin-top:12px"><summary>계산 근거 보기</summary>
       <div class="table-wrap"><table class="basis num"><thead><tr><th>이름</th><th>낸 돈</th><th>쓴 몫</th><th>송금</th><th>남은 차액</th></tr></thead><tbody>
@@ -707,6 +710,7 @@ function renderSettle(body, t, result) {
     a.addEventListener('click', () => store.logEvent(t.id, 'transfer_link', { kind: a.dataset.paylink }));
   });
   body.querySelector('#stmt-open')?.addEventListener('click', () => statementSheet(t));
+  bindExchangeCard(body, t);
   body.querySelector('#share-text').onclick = async () => {
     copy(settlementText(t, result, (pid) => nameOf(t, pid), await tripLink(t)), '정산표를 복사했어요. 카톡에 붙여 넣으세요');
     store.logEvent(t.id, 'settle_shared', { via: 'text' });
@@ -787,6 +791,7 @@ function renderBook(body, t) {
       </table>
       <p class="muted small">'표 복사'를 누르면 날짜·내용·분류·금액이 복사돼요. 엑셀이나 구글 시트에 붙여 넣으면 칸이 그대로 나뉘어요.</p>
     </div>
+    ${exchangeCard(t)}
     ${catCard(t, total)}
     ${soloAddCard(t)}`;
   body.querySelectorAll('[data-eid]').forEach((el) => {
@@ -802,6 +807,7 @@ function renderBook(body, t) {
     rows.push(['', '합계', '', fromMinor(total, B), '', '']);
     copy(rows.map((r) => r.join('\t')).join('\n'), '표를 복사했어요. 엑셀·시트에 붙여 넣으세요');
   };
+  bindExchangeCard(body, t);
   bindSoloAdd(body, t);
 }
 
@@ -1075,6 +1081,102 @@ function tidySheet(t) {
 // ───────── 카드 명세서로 맞추기 ─────────
 // 외화 지출을 실제 카드 청구액(정산 통화)으로 한 화면에서 맞춘다 — 해외여행 정산의 마지막 단계
 const foreignExpenses = (t) => t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && e.currency !== t.baseCurrency);
+// ───────── 환전 기록 (012) ─────────
+// 포린트·코루나를 미리 환전(트래블카드 충전 포함)해 쓰면, 그 현금으로 낸 지출은 내가 받은 환율로 계산한다.
+// 환전은 지출이 아니다 — 지출의 환율 칸에 환전 환율이 들어갈 뿐이라 정산 계산·이전 앱은 그대로다.
+const fxUsed = (t) => t.exchanges.length > 0 || foreignExpenses(t).length > 0
+  || (guessCurrency(t.name) && guessCurrency(t.name) !== t.baseCurrency);
+function exchangeLine(t, x) {
+  const u = rateUnit(x.currency);
+  return `${fmtMajor(x.baseAmount, t.baseCurrency)} → ${fmtMajor(x.amount, x.currency)}
+    <span class="muted">· ${u.toLocaleString('ko-KR')} ${x.currency} = ${fmtMajor(tidy((x.baseAmount / x.amount) * u), t.baseCurrency)}</span>`;
+}
+function exchangeCard(t) {
+  if (!fxUsed(t)) return '';
+  const curs = [...new Set(t.exchanges.map((x) => x.currency))];
+  return `<div class="card fx-card">
+    <div class="row between"><b>💱 환전 기록</b>${t.exchanges.length ? `<span class="badge">${t.exchanges.length}건</span>` : ''}</div>
+    <p class="muted small">${curs.length
+      ? `${curs.map((c) => `${rateUnit(c).toLocaleString('ko-KR')} ${c} = ${fmtMajor(tidy(exchangeRate(t, c) * rateUnit(c)), t.baseCurrency)}`).join(' · ')} — 이 통화로 지출을 적으면 환전 환율이 먼저 들어가요.`
+      : '현금이나 트래블카드로 미리 환전했다면 적어 두세요. 그 돈으로 낸 지출은 내가 받은 환율로 계산돼요.'}</p>
+    <button class="btn block" data-fx-open>${t.exchanges.length ? '환전 기록 보기' : '환전 적기'}</button>
+  </div>`;
+}
+function bindExchangeCard(body, t) {
+  body.querySelectorAll('[data-fx-open]').forEach((b) => { b.onclick = () => exchangeSheet(t); });
+}
+function exchangeSheet(t) {
+  const myId = me.get(t.id);
+  const solo = isSolo(t);
+  const canDel = (x) => x.mine || isAdmin(t);
+  const others = CURRENCIES.filter((c) => c !== t.baseCurrency);
+  const guess = lastCurrency(t);
+  const defCur = others.includes(guess) ? guess : others[0];
+  openSheet(`
+    <h2>💱 환전 기록</h2>
+    <p class="muted small">환전한 현금(트래블카드 충전 포함)으로 낸 지출은 여기 적은 환율로 계산돼요. 같은 통화를 여러 번 환전하면 평균 환율을 써요. 카드로 낸 지출은 참고 환율이나 카드 청구액으로 맞추세요.</p>
+    ${t.exchanges.length ? `<div class="fx-list">${t.exchanges.map((x) => `<div class="fx-item">
+      <div class="grow"><div class="small"><b>${esc(x.date ? x.date.slice(5).replace('-', '/') : '')}</b>${solo ? '' : ` · ${esc(nameOf(t, x.payerId))}`}</div>
+        <div class="num">${exchangeLine(t, x)}</div></div>
+      ${canDel(x) ? `<button type="button" class="btn sm ghost" data-fx-del="${esc(x.id)}">지우기</button>` : ''}</div>`).join('')}</div>` : ''}
+    <form id="fxf" class="stack" style="margin-top:12px">
+      <b>새로 적기</b>
+      <div class="amount-row">
+        <input class="input num" name="amount" inputmode="decimal" autocomplete="off" placeholder="받은 금액" aria-label="받은 외화 금액" required>
+        <select class="input cur" name="currency" aria-label="받은 통화">${others.map((c) => `<option ${c === defCur ? 'selected' : ''}>${c}</option>`).join('')}</select>
+      </div>
+      <label class="fx-row"><span>낸 돈</span><input class="input num" name="base" inputmode="decimal" autocomplete="off" placeholder="수수료 포함 실제로 낸 금액" required><span class="muted">${t.baseCurrency}</span></label>
+      <p class="muted small" id="fx-preview"></p>
+      ${solo ? '' : `<div class="field"><span class="muted small">누가 환전했나요?</span>
+        <div class="chips">${t.participants.map((pp) => `<button type="button" class="chip" data-fx-who="${esc(pp.id)}" aria-pressed="${pp.id === myId}">${esc(pp.name)}</button>`).join('')}</div></div>`}
+      <label class="field date-row"><span>날짜</span><input class="input" type="date" name="date" value="${today()}"></label>
+      <div class="row"><button type="button" class="btn grow" id="fx-close">닫기</button><button class="btn primary grow">적기</button></div>
+    </form>`, (el) => {
+    const f = el.querySelector('#fxf');
+    let who = myId || t.participants[0].id;
+    el.querySelector('#fx-close').onclick = closeSheet;
+    el.querySelectorAll('[data-fx-who]').forEach((b) => {
+      b.onclick = () => { who = b.dataset.fxWho; el.querySelectorAll('[data-fx-who]').forEach((x) => x.setAttribute('aria-pressed', x === b)); };
+    });
+    const preview = () => {
+      const a = parseAmount(f.amount.value); const b = parseAmount(f.base.value); const c = f.currency.value;
+      el.querySelector('#fx-preview').textContent = a > 0 && b > 0
+        ? `환전 환율 ${rateUnit(c).toLocaleString('ko-KR')} ${c} = ${fmtMajor(tidy((b / a) * rateUnit(c)), t.baseCurrency)}` : '';
+    };
+    f.amount.oninput = preview; f.base.oninput = preview; f.currency.onchange = preview;
+    el.querySelectorAll('[data-fx-del]').forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm('이 환전 기록을 지울까요? 이미 적은 지출의 환율은 바뀌지 않아요.')) return;
+        try { await store.deleteExchange(t.id, b.dataset.fxDel); view.trip = await store.getTrip(t.id); renderTrip(); exchangeSheet(view.trip); }
+        catch (err) { report(err); }
+      };
+    });
+    f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const amount = parseAmount(f.amount.value); const baseAmount = parseAmount(f.base.value);
+      if (!(amount > 0)) { f.amount.focus(); return toast('받은 금액을 확인해 주세요'); }
+      if (!(baseAmount > 0)) { f.base.focus(); return toast('낸 금액을 확인해 주세요'); }
+      const c = f.currency.value;
+      // 단위 실수(받은 돈·낸 돈을 바꿔 적음 등) 막기: 참고 환율과 3배 넘게 다르면 한 번 묻는다
+      const r = await getRate(c, t.baseCurrency).catch(() => null);
+      const mine = baseAmount / amount;
+      if (r?.rate && (mine / r.rate > 3 || r.rate / mine > 3)
+        && !confirm(`환전 환율이 참고 환율과 크게 달라요. 받은 금액과 낸 금액이 바뀌지 않았는지 확인해 주세요.\n그대로 적을까요?`)) return;
+      const btn = f.querySelector('.btn.primary');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await store.addExchange(t.id, { currency: c, amount, baseAmount, date: f.date.value || today(), payerId: who });
+        try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
+        view.trip = await store.getTrip(t.id);
+        renderTrip();
+        exchangeSheet(view.trip);
+        toast(`환전을 적었어요. 이제 ${c} 지출엔 환전 환율이 먼저 들어가요`);
+      } catch (err) { btn.disabled = false; report(isNetErr(err) ? new Error('환전 기록은 인터넷이 연결됐을 때 적을 수 있어요') : err); }
+    };
+  });
+}
+
 function statementCard(t) {
   const fx = foreignExpenses(t);
   if (!fx.length) return '';
@@ -1195,6 +1297,9 @@ function expenseSheet(exp) {
         <button type="button" class="btn sm ghost" id="rc-gallery">🖼 앨범</button>
       </div>
       <div id="fx" class="fx ${e.currency === t.baseCurrency ? 'hidden' : ''}">
+        <div class="chips fx-src hidden" id="fx-src" role="radiogroup" aria-label="환율 기준">
+          <button type="button" class="chip sm" role="radio" data-fxsrc="cash">💵 내 환전 환율</button>
+          <button type="button" class="chip sm" role="radio" data-fxsrc="ref">💳 참고 환율</button></div>
         <label class="fx-row"><span id="rate-label">환율</span>
           <input class="input num fx-rate" name="rate" inputmode="decimal" value="${esc(e.rate ? tidy(e.rate * rateUnit(e.currency)) : '')}"><span class="muted">${t.baseCurrency}</span></label>
         <details ${e.baseOverride != null && e.baseOverride !== '' ? 'open' : ''}><summary class="small">실제 카드 청구액으로 맞추기</summary>
@@ -1372,20 +1477,54 @@ function expenseSheet(exp) {
       };
     });
 
+    // 환율 기준: 이 통화로 환전한 기록이 있으면 '내 환전 환율'이 먼저(현금·트래블카드), 아니면 참고 환율 (012)
+    const src = { ref: null, refNote: '' };
+    const fxSrc = el.querySelector('#fx-src');
+    const showSrc = (k) => fxSrc.querySelectorAll('[data-fxsrc]').forEach((b) => b.setAttribute('aria-checked', b.dataset.fxsrc === k));
+    const useCash = () => {
+      const xr = exchangeRate(t, cur());
+      if (!xr) return false;
+      f.rate.value = tidy(xr * rateUnit(cur()));
+      const n = t.exchanges.filter((x) => x.currency === cur()).length;
+      el.querySelector('#fx-note').textContent = `환전 기록 ${n}건${n > 1 ? '의 평균' : ''} 환율이에요. 카드로 냈다면 '참고 환율'을 고르세요.`;
+      showSrc('cash');
+      return true;
+    };
+    const useRef = () => {
+      if (!src.ref) return;
+      f.rate.value = tidy(src.ref.rate * rateUnit(cur()));
+      el.querySelector('#fx-note').innerHTML = src.refNote;
+      showSrc('ref');
+    };
+    fxSrc.querySelector('[data-fxsrc=cash]').onclick = () => { useCash(); refresh(); };
+    fxSrc.querySelector('[data-fxsrc=ref]').onclick = () => { if (src.ref) { useRef(); refresh(); } else toast('참고 환율을 못 불러왔어요'); };
+    f.rate.addEventListener('input', () => showSrc(null));
     const updateFx = async () => {
       fx.classList.toggle('hidden', cur() === t.baseCurrency);
       el.querySelector('#rate-label').textContent = `${rateUnit(cur()).toLocaleString('ko-KR')} ${cur()} =`;
       if (cur() === t.baseCurrency) return;
+      const hasCash = !!exchangeRate(t, cur());
+      fxSrc.classList.toggle('hidden', !hasCash);
       const note = el.querySelector('#fx-note');
-      if (!f.rate.value || f.dataset.autoRateFor !== cur()) {
-        note.textContent = '환율 불러오는 중…';
-        const r = await getRate(cur(), t.baseCurrency);
-        if (r) {
-          if (!editing || f.dataset.autoRateFor) f.rate.value = tidy(r.rate * rateUnit(cur()));
-          f.dataset.autoRateFor = cur();
-          f.dataset.refRate = r.rate; // 단위 실수 경고용 (1단위 기준)
-          note.innerHTML = `${esc(r.date)} 참고 환율이에요. 카드 청구액과 다를 수 있어요 · <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${RATE_ATTRIBUTION.text}</a>`;
-        } else note.textContent = '환율을 못 불러왔어요. 직접 입력해 주세요.';
+      const fresh = !f.rate.value || f.dataset.autoRateFor !== cur();
+      if (fresh) note.textContent = '환율 불러오는 중…';
+      const c = cur();
+      const r = await getRate(c, t.baseCurrency);
+      if (c !== cur()) return; // 불러오는 사이 통화를 바꿨으면 버린다
+      if (r) {
+        src.ref = r;
+        src.refNote = `${esc(r.date)} 참고 환율이에요. 카드 청구액과 다를 수 있어요 · <a href="${RATE_ATTRIBUTION.href}" target="_blank" rel="noopener">${RATE_ATTRIBUTION.text}</a>`;
+        f.dataset.refRate = r.rate; // 단위 실수 경고용 (1단위 기준)
+      } else src.ref = null;
+      if (fresh) { // 새 지출, 통화를 바꿨을 때, 청구액만 있던 지출을 고칠 때
+        f.dataset.autoRateFor = c;
+        if (hasCash) useCash();
+        else if (r) useRef();
+        else note.textContent = '환율을 못 불러왔어요. 직접 입력해 주세요.';
+      } else if (hasCash) {
+        // 고치는 중: 저장된 환율이 어느 쪽과 같은지 표시만
+        const v = f.rate.value;
+        showSrc(v === String(tidy(exchangeRate(t, c) * rateUnit(c))) ? 'cash' : r && v === String(tidy(r.rate * rateUnit(c))) ? 'ref' : null);
       }
     };
     if (editing) f.dataset.autoRateFor = e.currency;
