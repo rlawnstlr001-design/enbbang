@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency,
-} from './settle.js?v=202610091615';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610091615';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610091615';
+} from './settle.js?v=202610121004';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121004';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121004';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610091615';
+} from './share.js?v=202610121004';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610091615';
+} from './native.js?v=202610121004';
 
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'TWD', 'VND', 'THB', 'PHP', 'CNY', 'HKD', 'SGD', 'GBP', 'AUD',
   'IDR', 'MYR', 'CAD', 'CHF', 'NZD'];
@@ -110,12 +110,15 @@ const tidy = (x) => (Number(x) >= 1 ? Math.round(Number(x) * 100) / 100 : Number
 
 function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?.name ?? '?'; }
 const isAdmin = (trip) => !!me.adminKey(trip.id);
+// 혼자 쓰는 가계부 — 따로 표시 없이 참여자가 한 명인 방. 사람을 추가하면 그대로 정산 방이 된다 (10/12)
+const isSolo = (trip) => trip.participants.length === 1;
+const tabsOf = (trip) => (isSolo(trip) ? [['list', '지출'], ['book', '가계부']] : [['list', '지출'], ['settle', '정산'], ['people', '멤버']]);
 
 // ───────── 라우터 ─────────
 async function route() {
   const h = location.hash.slice(1);
   // 같은 여행방 안에서 탭만 바꾸는 경우 — 다시 불러오거나 실시간 연결을 새로 맺지 않는다 (10/7)
-  const same = h.match(/^\/t\/([\w-]+)(?:\/(settle|people))?$/);
+  const same = h.match(/^\/t\/([\w-]+)(?:\/(settle|people|book))?$/);
   if (same && view.trip && view.unsub && view.tripId === same[1]) {
     closeSheet();
     const tab = same[2] || 'list';
@@ -233,9 +236,14 @@ function renderHome() {
       <li><b>쓴 돈 적기</b><span>정산표는 자동</span></li>
     </ol>
     <form class="card stack" id="create">
+      <div class="seg" role="radiogroup" aria-label="여행 방식">
+        <button type="button" role="radio" data-kind="group" aria-checked="true">👥 같이 정산</button>
+        <button type="button" role="radio" data-kind="solo" aria-checked="false">🧳 혼자 가계부</button>
+      </div>
       <label class="field"><span>여행 이름</span>
         <input class="input" name="name" maxlength="60" placeholder="예: 10월 오사카 3박4일" required></label>
-      <div class="field"><span>함께 가는 사람</span>
+      <p class="muted small hidden" id="solo-note">혼자 쓴 돈을 날짜·분류별 표로 정리해 드려요. 나중에 같이 쓰게 되면 사람을 추가해 정산할 수 있어요.</p>
+      <div class="field" id="members-field"><span>함께 가는 사람</span>
         <div class="chips members" id="members"></div>
         <div class="row" style="margin-top:8px">
           <input class="input grow" id="mname" maxlength="30" placeholder="내 이름부터 입력" enterkeyhint="done" autocomplete="off">
@@ -243,7 +251,7 @@ function renderHome() {
         </div></div>
       <label class="field"><span>정산 통화</span>
         <select class="input" name="base">${CURRENCIES.map((c) => `<option ${c === 'KRW' ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
-      <button class="btn primary block">여행방 만들기</button>
+      <button class="btn primary block" id="create-btn">여행방 만들기</button>
     </form>
     ${recent.length ? `<div class="card recent" style="margin-top:16px"><b>최근 여행방</b>
       ${recent.map((t) => `<a href="#/t/${esc(t.id)}"><span>${esc(t.name)}</span><span class="muted small">${new Date(t.at).toLocaleDateString('ko-KR')}</span></a>`).join('')}</div>` : ''}
@@ -294,13 +302,23 @@ function renderHome() {
     toast(`지난 여행 멤버 ${prefill.names.length}명을 채워 뒀어요`);
   }
   renderMembers();
+  // 같이 가는 여행 / 혼자 쓰는 가계부 — 혼자면 멤버 입력을 숨기고 '나' 한 명으로 만든다
+  let solo = false;
+  const setKind = (k) => {
+    solo = k === 'solo';
+    $app.querySelectorAll('[data-kind]').forEach((b) => b.setAttribute('aria-checked', b.dataset.kind === k));
+    $app.querySelector('#members-field').classList.toggle('hidden', solo);
+    $app.querySelector('#solo-note').classList.toggle('hidden', !solo);
+    $app.querySelector('#create-btn').textContent = solo ? '가계부 만들기' : '여행방 만들기';
+  };
+  $app.querySelectorAll('[data-kind]').forEach((b) => { b.onclick = () => setKind(b.dataset.kind); });
   $app.querySelectorAll('[data-prep]').forEach((a) => a.addEventListener('click', () => store.logEvent(null, 'prep_link', { kind: a.dataset.prep })));
 
   $app.querySelector('#create').onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    if (mInput.value.trim()) addMembers(); // 입력해 두고 추가를 안 누른 이름도 챙긴다
-    const names = [...members];
+    if (!solo && mInput.value.trim()) addMembers(); // 입력해 두고 추가를 안 누른 이름도 챙긴다
+    const names = solo ? ['나'] : [...members];
     if (!names.length) { mInput.focus(); return toast('함께 가는 사람을 적어 주세요'); }
     if (names.length > 30) return toast('최대 30명까지예요');
     e.target.querySelector('button').disabled = true;
@@ -308,8 +326,8 @@ function renderHome() {
       const t = await store.createTrip({ name: String(f.get('name')).trim(), baseCurrency: f.get('base'), names });
       me.set(t.id, t.participants[0].id);
       store.claimParticipant(t.id, t.participants[0].id).catch(() => {});
-      sessionStorage.setItem(`fresh:${t.id}`, '1'); // 방금 만든 방 → 초대 카드를 크게
-      store.logEvent(t.id, 'trip_source', firstTouch()); // 어디서 와서 방을 만들었나 (블로그·쇼츠·인스타 utm)
+      if (!solo) sessionStorage.setItem(`fresh:${t.id}`, '1'); // 방금 만든 방 → 초대 카드를 크게
+      store.logEvent(t.id, 'trip_source', { ...firstTouch(), ...(solo ? { solo: true } : {}) }); // 어디서 와서 방을 만들었나 (블로그·쇼츠·인스타 utm)
       location.hash = `#/t/${t.id}`;
     } catch (err) { report(err); e.target.querySelector('button').disabled = false; }
   };
@@ -357,8 +375,13 @@ async function openTrip(id, tab) {
     sessionStorage.setItem(`opened:${id}`, '1');
     store.logEvent(id, 'trip_opened');
   }
+  const known = me.get(id) && view.trip.participants.some((p) => p.id === me.get(id));
+  if (!known && isSolo(view.trip)) { // 혼자 쓰는 가계부는 고를 사람이 없다 (다른 기기에서 열었을 때)
+    me.set(id, view.trip.participants[0].id);
+    store.claimParticipant(id, view.trip.participants[0].id).catch(() => {});
+  }
   renderTrip();
-  if (!me.get(id) || !view.trip.participants.some((p) => p.id === me.get(id))) pickIdentity();
+  if (!known && !isSolo(view.trip)) pickIdentity();
   if (tab === 'settle') store.logEvent(id, 'settle_viewed');
 }
 
@@ -368,7 +391,11 @@ function renderTrip() {
   const result = settle(t);
   const myId = me.get(t.id);
   const mine = result.balances.find((b) => b.pid === myId);
-  const tabs = [['list', '지출'], ['settle', '정산'], ['people', '멤버']];
+  const solo = isSolo(t);
+  const tabs = tabsOf(t);
+  // 가계부 ↔ 정산 방이 바뀌면(사람 추가·정리) 없는 탭에 머물지 않게
+  if (!tabs.some(([k]) => k === view.tab)) view.tab = solo ? 'book' : 'settle';
+  const days = solo ? spanDays(t) : 0;
 
   $app.innerHTML = `
     <header class="top">
@@ -376,7 +403,7 @@ function renderTrip() {
         <a class="icon-btn" href="#/" aria-label="처음으로">←</a>
         <h1 class="grow">${esc(t.name)}</h1>
         ${t.settledAt ? '<span class="badge">정산 완료</span>' : ''}
-        <button class="btn sm primary" id="share">친구 초대</button>
+        ${solo ? '' : '<button class="btn sm primary" id="share">친구 초대</button>'}
         ${GEAR}
       </div>
       <nav class="tabs" role="tablist">${tabs.map(([k, l]) =>
@@ -384,9 +411,11 @@ function renderTrip() {
     </header>
     <div class="summary">
       <div class="card"><span class="muted small">총 지출</span><b class="num">${fmt(result.totalSpent, t.baseCurrency)}</b></div>
-      <div class="card"><span class="muted small">${!mine ? '나' : `${esc(nameOf(t, myId))}님 ${mine.net > 0 ? '받을 돈' : mine.net < 0 ? '낼 돈' : ''}`}</span>
+      ${solo ? `<div class="card"><span class="muted small">하루 평균${days ? ` · ${days}일` : ''}</span>
+        <b class="num">${days ? fmt(Math.round(result.totalSpent / days), t.baseCurrency) : '—'}</b></div>`
+      : `<div class="card"><span class="muted small">${!mine ? '나' : `${esc(nameOf(t, myId))}님 ${mine.net > 0 ? '받을 돈' : mine.net < 0 ? '낼 돈' : ''}`}</span>
         <b class="num ${mine?.net > 0 ? 'plus' : mine?.net < 0 ? 'minus' : ''}">${!mine ? '—'
-          : mine.net ? fmt(Math.abs(mine.net), t.baseCurrency) : '정산 0원'}</b></div>
+          : mine.net ? fmt(Math.abs(mine.net), t.baseCurrency) : '정산 0원'}</b></div>`}
     </div>
     <main id="tab-body"></main>
     ${view.tab === 'list' ? '<button class="fab" id="add">＋ 지출</button>' : ''}`;
@@ -394,7 +423,7 @@ function renderTrip() {
   $app.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => goTab(b.dataset.tab);
   });
-  $app.querySelector('#share').onclick = () => shareTrip(t);
+  $app.querySelector('#share')?.addEventListener('click', () => shareTrip(t));
   const add = $app.querySelector('#add');
   if (add) add.onclick = () => expenseSheet();
 
@@ -402,6 +431,7 @@ function renderTrip() {
   if (view.slide) { body.classList.add(`slide-${view.slide}`); view.slide = null; } // 스와이프로 왔으면 밀려 들어오기
   if (view.tab === 'settle') renderSettle(body, t, result);
   else if (view.tab === 'people') renderPeople(body, t);
+  else if (view.tab === 'book') renderBook(body, t);
   else renderList(body, t);
   updateOfflineBar();
 }
@@ -464,7 +494,7 @@ function renderList(body, t) {
       return `${day}<div class="exp" data-eid="${esc(e.id)}">
         <span class="cat-ico" aria-label="${cat.label}">${cat.emoji}</span>
         <div class="grow"><div class="t">${esc(e.title)}${e.receipt ? ' <span class="rc-mark" aria-label="영수증 있음">🧾</span>' : ''}${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}${broken.has(e.id) ? ' <span class="badge broken">계산 제외</span>' : ''}</div>
-          <div class="muted small">${esc(nameOf(t, e.payerId))} 결제 · ${who}</div></div>
+          <div class="muted small">${isSolo(t) ? cat.label : `${esc(nameOf(t, e.payerId))} 결제 · ${who}`}</div></div>
         <div class="amt num">${fmtMajor(e.amount, e.currency)}${baseLine}</div></div>`;
     }).join('')}`;
 
@@ -486,6 +516,7 @@ function renderList(body, t) {
 
 // 초대 카드: 방을 막 만들었거나, 아직 안 들어온 멤버가 있고 지출이 적을 때 맨 위에
 function inviteCard(t, spendCount) {
+  if (isSolo(t)) return '';
   const cloud = store.mode === 'cloud';
   const waiting = cloud ? t.participants.filter((p) => !p.joinedAt) : [];
   const fresh = sessionStorage.getItem(`fresh:${t.id}`) && spendCount < 3;
@@ -713,6 +744,101 @@ function catCard(t, total) {
         <span class="num cat-amt">${fmt(c.total, t.baseCurrency)} <span class="muted">${pct}%</span></span></div>`;
     }).join('')}
   </div>`;
+}
+
+// 첫 지출 날부터 마지막 지출 날까지 며칠 (하루 평균용)
+function spanDays(t) {
+  const ds = t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && /^\d{4}-\d{2}-\d{2}$/.test(e.date || '')).map((e) => e.date).sort();
+  if (!ds.length) return 0;
+  return Math.round((Date.parse(ds.at(-1)) - Date.parse(ds[0])) / 864e5) + 1;
+}
+
+// 가계부 탭 (혼자 쓰는 방) — 날짜별 소계가 붙은 표, 분류별 합계, 엑셀·시트에 붙여 넣는 표 복사
+function renderBook(body, t) {
+  const spends = t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
+  if (!spends.length) {
+    body.innerHTML = `<div class="empty">아직 지출이 없어요.<br><b>지출</b> 탭의 <b>＋ 지출</b>로 적으면 여기에 날짜별 표로 정리돼요.</div>${soloAddCard(t)}`;
+    bindSoloAdd(body, t);
+    return;
+  }
+  const B = t.baseCurrency;
+  const baseOf = (e) => { try { return expenseBaseMinor(e, B); } catch { return null; } };
+  const catOf = (e) => CATEGORIES.find((c) => c.id === e.category) || CATEGORIES.find((c) => c.id === 'etc');
+  const days = [];
+  for (const e of spends) {
+    if (days.at(-1)?.date !== e.date) days.push({ date: e.date, items: [], sum: 0 });
+    days.at(-1).items.push(e);
+    days.at(-1).sum += baseOf(e) ?? 0;
+  }
+  const total = days.reduce((s, d) => s + d.sum, 0);
+  const start = days[0].date;
+  body.innerHTML = `
+    <div class="card book">
+      <div class="row between"><b>날짜별 가계부</b><button type="button" class="btn sm ghost" id="book-copy">📋 표 복사</button></div>
+      <table class="book-table">
+        <thead><tr><th>내용</th><th>분류</th><th class="num">금액</th></tr></thead>
+        <tbody>${days.map((d) => `
+          <tr class="book-day"><th colspan="2">${esc(dayLabel(d.date, start))}</th><td class="num">${fmt(d.sum, B)}</td></tr>
+          ${d.items.map((e) => {
+            const v = baseOf(e);
+            const c = catOf(e);
+            return `<tr data-eid="${esc(e.id)}"><td>${esc(e.title)}</td><td class="book-cat">${c.emoji} ${c.label}</td>
+              <td class="num">${v == null ? '<span class="minus">환율 필요</span>' : fmt(v, B)}${e.currency !== B ? `<div class="muted small">${fmtMajor(e.amount, e.currency)}</div>` : ''}</td></tr>`;
+          }).join('')}`).join('')}
+        </tbody>
+        <tfoot><tr><th colspan="2">합계 · ${spends.length}건</th><td class="num">${fmt(total, B)}</td></tr></tfoot>
+      </table>
+      <p class="muted small">'표 복사'를 누르면 날짜·내용·분류·금액이 복사돼요. 엑셀이나 구글 시트에 붙여 넣으면 칸이 그대로 나뉘어요.</p>
+    </div>
+    ${catCard(t, total)}
+    ${soloAddCard(t)}`;
+  body.querySelectorAll('[data-eid]').forEach((el) => {
+    el.onclick = () => expenseSheet(t.expenses.find((e) => e.id === el.dataset.eid));
+  });
+  body.querySelector('#book-copy').onclick = () => {
+    const cell = (s) => String(s ?? '').replace(/[\t\r\n]+/g, ' ');
+    const rows = [['날짜', '내용', '분류', `금액(${B})`, '원래 금액', '통화']];
+    for (const e of spends) {
+      const v = baseOf(e);
+      rows.push([e.date, cell(e.title), catOf(e).label, v == null ? '' : fromMinor(v, B), e.amount, e.currency]);
+    }
+    rows.push(['', '합계', '', fromMinor(total, B), '', '']);
+    copy(rows.map((r) => r.join('\t')).join('\n'), '표를 복사했어요. 엑셀·시트에 붙여 넣으세요');
+  };
+  bindSoloAdd(body, t);
+}
+
+// 혼자 가계부 → 같이 쓰게 되면 사람만 추가하면 정산 방이 된다 (지금까지 지출은 내가 낸 것으로 남는다)
+function soloAddCard(t) {
+  const unnamed = t.participants[0].name === '나'; // 가계부로 만들면 이름이 '나' — 친구가 보기 전에 내 이름부터
+  return `<div class="card" style="margin-top:12px"><b>같이 쓰게 됐나요?</b>
+    <p class="small muted">사람을 추가하면 정산·멤버 탭이 생기고 친구를 초대할 수 있어요. 지금까지 적은 지출은 그대로 내 지출로 남아요.</p>
+    <form id="solo-add" class="stack">
+      ${unnamed ? '<input class="input" name="mine" maxlength="30" placeholder="내 이름 (친구에게 보여요)" required>' : ''}
+      <div class="row"><input class="input grow" name="n" maxlength="30" placeholder="함께 쓸 사람 이름" required>
+      <button class="btn">추가</button></div></form></div>`;
+}
+function bindSoloAdd(body, t) {
+  const f = body.querySelector('#solo-add');
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const n = fd.get('n').trim();
+    const mine = (fd.get('mine') || '').trim();
+    if (!n) return;
+    if (t.participants.some((p) => p.name === n) || n === mine) return toast('같은 이름이 이미 있어요');
+    try {
+      if (mine) await store.updateParticipant(t.id, t.participants[0].id, { name: mine });
+      await store.addParticipant(t.id, n);
+      view.trip = await store.getTrip(t.id);
+      toast(`${n}님을 추가했어요. 이제 정산 탭이 생겼어요`);
+      goTab('people');
+      view.tab = 'people';
+      renderTrip();
+    } catch (err) { report(err); }
+  };
 }
 
 function renderPeople(body, t) {
@@ -1080,7 +1206,7 @@ function expenseSheet(exp) {
         </details>
         <p class="muted small" id="fx-note"></p>
       </div>
-      <p class="summary-line" id="summary"></p>
+      <p class="summary-line ${isSolo(t) ? 'hidden' : ''}" id="summary"></p>
       <div id="payer-pick" class="card panel hidden">
         <span class="muted small">누가 냈나요?</span>
         <div class="chips">${people.map((p) => `<button type="button" class="chip" data-payer="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
@@ -1362,13 +1488,13 @@ function expenseSheet(exp) {
 
 // ───────── 탭 스와이프 (지출 ↔ 정산 ↔ 멤버) ─────────
 // 손가락을 왼쪽으로 밀면 오른쪽 탭, 오른쪽으로 밀면 왼쪽 탭 (갤럭시·카톡 탭과 같은 방향)
-const TAB_ORDER = ['list', 'settle', 'people'];
 const swipe = { x: 0, y: 0, t: 0, active: false, decided: false, horizontal: false };
 const SWIPE_IGNORE = 'input, textarea, select, .cats, .scrim, .seg, .chips, [data-noswipe]';
 
 function swipeTarget(dir) {
-  const i = TAB_ORDER.indexOf(view.tab) + dir;
-  return i >= 0 && i < TAB_ORDER.length ? TAB_ORDER[i] : null;
+  const order = view.trip ? tabsOf(view.trip).map(([k]) => k) : [];
+  const i = order.indexOf(view.tab) + dir;
+  return i >= 0 && i < order.length ? order[i] : null;
 }
 
 addEventListener('touchstart', (e) => {

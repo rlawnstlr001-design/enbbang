@@ -443,3 +443,15 @@ html.landing body { background: #FFFFFF; }
 /* 여행 준비 안내 (유심사 제휴·운영자 블로그·여행지별 안내) */
 .prep { margin-top: 16px; }
 .prep p { margin: 6px 0 0; }
+
+/* 혼자 쓰는 가계부 — 날짜별 소계 표 (10/12) */
+#create > .seg { margin-bottom: 4px; }
+.book-table { width: 100%; border-collapse: collapse; margin: 10px 0 8px; font-size: 14px; table-layout: fixed; }
+.book-table th, .book-table td { padding: 9px 4px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.book-table thead th { color: var(--muted); font-size: 12px; font-weight: 600; }
+.book-table th:nth-child(2), .book-table td.book-cat { width: 72px; color: var(--muted); font-size: 13px; }
+.book-table .num { text-align: right; width: 104px; white-space: nowrap; }
+.book-table thead th.num { width: 104px; }
+.book-day th, .book-day td { background: var(--surface-2); font-weight: 700; font-size: 13px; }
+.book-table tbody tr[data-eid] { cursor: pointer; }
+.book-table tfoot th, .book-table tfoot td { font-weight: 800; border-bottom: 0; padding-top: 12px; }
