@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610121043';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121043';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121043';
+} from './settle.js?v=202610121235';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121235';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121235';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly,
-} from './share.js?v=202610121043';
+} from './share.js?v=202610121235';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610121043';
+} from './native.js?v=202610121235';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -476,7 +476,8 @@ function renderList(body, t) {
       <p class="small">금액·환율·나눌 사람 중 비어 있는 게 있어요. 아래 <b>계산 제외</b> 표시된 지출을 눌러 고쳐 주세요.</p></div>` : ''}
     ${inviteCard(t, spends.length)}
     ${potCard(t)}
-    ${fxUsed(t) ? `<div class="row list-tools"><button type="button" class="btn sm ghost" data-fx-open>💱 환전 기록${t.exchanges.length ? ` ${t.exchanges.length}건` : ''}</button></div>` : ''}
+    ${budgetCard(t)}
+    <div class="row list-tools">${getBudget(t) ? '' : '<button type="button" class="btn sm ghost" data-budget-open>🎯 예산 정하기</button>'}${fxUsed(t) ? `<button type="button" class="btn sm ghost" data-fx-open>💱 환전 기록${t.exchanges.length ? ` ${t.exchanges.length}건` : ''}</button>` : ''}</div>
     ${live.length > 4 ? `<input class="input" id="q" type="search" placeholder="검색 (내용·낸 사람)" value="${esc(view.q)}">` : ''}
     ${curLine}
     ${!spends.length ? `<div class="empty">아직 지출이 없어요.<br>아래 <b>＋ 지출</b>로 첫 항목을 넣어 보세요.</div>` : ''}
@@ -524,6 +525,7 @@ function renderList(body, t) {
   bindInviteCard(body, t);
   bindExchangeCard(body, t);
   bindPotCard(body, t);
+  bindBudget(body, t);
 }
 
 // 초대 카드: 방을 막 만들었거나, 아직 안 들어온 멤버가 있고 지출이 적을 때 맨 위에
@@ -796,6 +798,7 @@ function renderBook(body, t) {
   const total = days.reduce((s, d) => s + d.sum, 0);
   const start = days[0].date;
   body.innerHTML = `
+    ${budgetCard(t, true)}
     <div class="card book">
       <div class="row between"><b>날짜별 가계부</b><button type="button" class="btn sm ghost" id="book-copy">📋 표 복사</button></div>
       <table class="book-table">
@@ -830,6 +833,7 @@ function renderBook(body, t) {
     copy(rows.map((r) => r.join('\t')).join('\n'), '표를 복사했어요. 엑셀·시트에 붙여 넣으세요');
   };
   bindExchangeCard(body, t);
+  bindBudget(body, t);
   bindSoloAdd(body, t);
 }
 
@@ -1111,6 +1115,102 @@ function tidySheet(t) {
 // ───────── 카드 명세서로 맞추기 ─────────
 // 외화 지출을 실제 카드 청구액(정산 통화)으로 한 화면에서 맞춘다 — 해외여행 정산의 마지막 단계
 const foreignExpenses = (t) => t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && e.currency !== t.baseCurrency);
+// ───────── 예산 (이 폰에만 저장) ─────────
+// 개인 예산이라 서버에 올리지 않는다 — 친구에게 안 보이고, 송금 정보 변경 경고(payChangedAt)도 건드리지 않는다.
+// 같이 가는 방은 '내 몫'(정산 계산의 owed) 기준, 혼자 가계부는 총 지출 기준.
+const BUDGET_KEY = (id) => `enbbang:budget:${id}`;
+function getBudget(t) {
+  try {
+    const b = JSON.parse(localStorage.getItem(BUDGET_KEY(t.id)) || 'null');
+    return b && b.total > 0 && b.days > 0 ? b : null;
+  } catch { return null; }
+}
+function setBudget(t, b) {
+  try { b ? localStorage.setItem(BUDGET_KEY(t.id), JSON.stringify(b)) : localStorage.removeItem(BUDGET_KEY(t.id)); } catch { /* 사생활 보호 모드 */ }
+}
+// '7박8일' → 8, '3박 4일' → 4
+const daysFromName = (name) => { const m = /(\d+)\s*박\s*(\d+)\s*일/.exec(name || ''); return m ? +m[2] : null; };
+const dayDiff = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+function budgetStats(t) {
+  const b = getBudget(t);
+  if (!b) return null;
+  const B = t.baseCurrency;
+  const solo = isSolo(t);
+  let spent = 0;
+  if (solo) spent = settle(t).totalSpent;
+  else {
+    const mine = settle(t).balances.find((x) => x.pid === me.get(t.id));
+    spent = mine ? mine.owed : 0;
+  }
+  const total = toMinor(b.total, B);
+  const idx = Math.min(Math.max(dayDiff(b.start, today()) + 1, 1), b.days + 1); // 오늘이 며칠째 (끝났으면 days+1)
+  const daysLeft = Math.max(b.days - idx + 1, 0);
+  let todaySpent = null;
+  if (solo) {
+    todaySpent = 0;
+    for (const e of t.expenses) {
+      if (e.deletedAt || e.kind === 'transfer' || e.date !== today()) continue;
+      try { todaySpent += expenseBaseMinor(e, B); } catch { /* 환율 없음 */ }
+    }
+  }
+  return { b, B, solo, spent, total, left: total - spent, idx, daysLeft, todaySpent, perDay: Math.round(total / b.days) };
+}
+function budgetCard(t, offer = false) {
+  const st = budgetStats(t);
+  if (!st) {
+    return offer ? `<div class="card budget-card"><b>🎯 예산을 정해 볼까요?</b>
+      <p class="muted small">총 예산과 여행 일수를 넣으면 남은 돈과 하루에 쓸 수 있는 금액을 알려 드려요. 예산은 이 폰에만 저장돼요.</p>
+      <button type="button" class="btn block" data-budget-open>예산 정하기</button></div>` : '';
+  }
+  const { B, total, spent, left, daysLeft } = st;
+  const pct = total ? Math.min(Math.round((spent / total) * 100), 100) : 0;
+  const over = left < 0;
+  const line = over ? `예산보다 <b class="minus">${fmt(-left, B)}</b> 더 썼어요`
+    : daysLeft > 0 ? `오늘 포함 남은 ${daysLeft}일 동안 하루 <b>${fmt(Math.floor(left / daysLeft), B)}</b>씩 쓸 수 있어요`
+    : `여행이 끝났어요 · 예산에서 ${fmt(left, B)} 남았어요`;
+  return `<div class="card budget-card ${over ? 'over' : ''}">
+    <div class="row between"><b>🎯 ${st.solo ? '예산' : '내 예산'}</b><button type="button" class="link-btn small" data-budget-open>바꾸기</button></div>
+    <div class="budget-bar" role="img" aria-label="예산의 ${pct}% 사용"><i style="width:${Math.max(pct, 2)}%"></i></div>
+    <p class="small"><span class="num">${fmt(spent, B)}</span> / ${fmt(total, B)} · ${over ? '초과' : `남은 돈 ${fmt(left, B)}`}</p>
+    <p class="small">${line}</p>
+    ${st.todaySpent != null && daysLeft > 0 ? `<p class="muted small">오늘 쓴 돈 ${fmt(st.todaySpent, B)} · 처음 정한 하루 예산 ${fmt(st.perDay, B)}</p>` : ''}
+    ${st.solo ? '' : '<p class="muted small">같이 쓴 지출은 내 몫만 셌어요.</p>'}
+  </div>`;
+}
+function bindBudget(body, t) {
+  body.querySelectorAll('[data-budget-open]').forEach((b) => { b.onclick = () => budgetSheet(t); });
+}
+function budgetSheet(t) {
+  const b = getBudget(t);
+  const B = t.baseCurrency;
+  const first = t.expenses.filter((e) => !e.deletedAt && e.kind !== 'transfer' && e.date).map((e) => e.date).sort()[0];
+  openSheet(`
+    <h2>🎯 ${isSolo(t) ? '예산' : '내 예산'}</h2>
+    <p class="muted small">${isSolo(t) ? '쓴 돈 전체' : '같이 쓴 지출 중 내 몫'}을 예산과 비교해요. 이 폰에만 저장되고 친구에게는 보이지 않아요.</p>
+    <form id="bf" class="stack">
+      <label class="fx-row"><span>총 예산</span><input class="input num" name="total" inputmode="decimal" autocomplete="off" required
+        value="${b ? Number(b.total).toLocaleString('ko-KR') : ''}" placeholder="예: 2,000,000"><span class="muted">${B}</span></label>
+      <label class="fx-row"><span>여행 일수</span><input class="input num" name="days" inputmode="numeric" autocomplete="off" required
+        value="${b ? b.days : daysFromName(t.name) || ''}" placeholder="예: 8"><span class="muted">일</span></label>
+      <label class="field date-row"><span>첫날</span><input class="input" type="date" name="start" value="${esc(b?.start || first || today())}"></label>
+      <div class="row">${b ? '<button type="button" class="btn ghost" id="b-del">지우기</button>' : ''}
+        <button type="button" class="btn grow" id="b-close">닫기</button><button class="btn primary grow">저장</button></div>
+    </form>`, (el) => {
+    const f = el.querySelector('#bf');
+    el.querySelector('#b-close').onclick = closeSheet;
+    el.querySelector('#b-del')?.addEventListener('click', () => { setBudget(t, null); closeSheet(); renderTrip(); toast('예산을 지웠어요'); });
+    f.onsubmit = (ev) => {
+      ev.preventDefault();
+      const total = parseAmount(f.total.value); const days = Math.round(parseAmount(f.days.value));
+      if (!(total > 0)) { f.total.focus(); return toast('총 예산을 확인해 주세요'); }
+      if (!(days >= 1 && days <= 120)) { f.days.focus(); return toast('여행 일수는 1~120일로 넣어 주세요'); }
+      setBudget(t, { total, days, start: f.start.value || today() });
+      closeSheet(); renderTrip();
+      toast('예산을 저장했어요');
+    };
+  });
+}
+
 // ───────── 공금(회비) ─────────
 // 걷은 돈 = 멤버→공금 송금, 쓴 돈 = 공금이 낸 지출, 돌려준 돈 = 공금→멤버 송금
 function potStats(t) {

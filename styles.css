@@ -470,3 +470,11 @@ html.landing body { background: #FFFFFF; }
 .pot-card .btn { margin-top: 10px; }
 .pot-left { font-weight: 800; }
 .dues-list { display: grid; gap: 8px; }
+
+/* 예산 (이 폰에만 저장) */
+.budget-card { margin-bottom: 12px; }
+.budget-card p { margin: 6px 0 0; }
+.budget-bar { height: 10px; border-radius: 99px; background: var(--surface-2); margin-top: 10px; overflow: hidden; }
+.budget-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.budget-card.over .budget-bar i { background: var(--minus, #D9480F); }
+.list-tools:empty { display: none; }
