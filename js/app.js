@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610121237';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610121237';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610121237';
+} from './settle.js?v=202610191642';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610191642';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610191642';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
-} from './share.js?v=202610121237';
+} from './share.js?v=202610191642';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
-  getSettings, setSetting, applyTheme, pickPhoto, compressImage, askReview,
-} from './native.js?v=202610121237';
+  getSettings, setSetting, applyTheme, pickPhoto, restoredPhoto, compressImage, askReview,
+} from './native.js?v=202610191642';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -1525,17 +1525,23 @@ function splitModeOf(shares) {
   return 'equal';
 }
 
-function expenseSheet(exp) {
+// draft: 사진을 고르는 사이 앱이 꺼졌을 때 쓰던 내용 (resumePhotoDraft)
+function expenseSheet(exp, draft) {
   const t = view.trip;
   const myId = me.get(t.id);
   const editing = !!exp;
   const canEdit = !editing || exp.mine || exp.device === deviceId() || isAdmin(t); // mine: 서버, device: 로컬 모드·저장 대기
-  const e = exp || {
+  const base = exp || {
     title: '', date: today(), amount: '', currency: lastCurrency(t), rate: '', baseOverride: '',
     payerId: myId || t.participants[0].id,
     // 새 지출 기본값: "이후 제외"된 사람은 빼고, 각자의 기본 몫(커플 2 등)을 쓴다
     shares: t.participants.filter((p) => !p.excluded).map((p) => ({ pid: p.id, w: p.defaultW ?? 1 })),
   };
+  const e = draft ? {
+    ...base, title: draft.title, date: draft.date || base.date, amount: draft.amount, currency: draft.currency,
+    rate: draft.rate ?? '', baseOverride: draft.baseOverride ?? '', payerId: draft.payerId || base.payerId,
+    category: draft.cat, receipt: draft.receipt,
+  } : base;
   const people = humans(t); // 나눌 사람 — 공금은 몫이 없다
   const payers = [...t.participants].sort((a, b) => (isPot(b) ? 1 : 0) - (isPot(a) ? 1 : 0)); // 낸 사람 — 공금을 맨 앞에
   const st = {
@@ -1550,6 +1556,10 @@ function expenseSheet(exp) {
     receipt: e.receipt || null, // 저장된 사진 경로
     photo: null, // 새로 고른 사진(아직 안 올림)
   };
+  if (draft) Object.assign(st, {
+    mode: draft.mode, sel: new Set(draft.sel), parts: new Map(draft.parts), exact: new Map(draft.exact),
+    cat: draft.cat, catTouched: draft.catTouched,
+  });
   if (st.mode !== 'parts') people.forEach((p) => st.parts.set(p.id, st.sel.has(p.id) ? 1 : 0));
 
   openSheet(`
@@ -1567,6 +1577,7 @@ function expenseSheet(exp) {
         <button type="button" class="btn sm ghost" id="rc-camera">📷 영수증 찍기</button>
         <button type="button" class="btn sm ghost" id="rc-gallery">🖼 앨범</button>
       </div>
+      <p class="muted small hidden" id="rc-hint">사진은 이 지출에 영수증으로 붙여 둬요(나중에 확인용). 금액과 내용은 위에 직접 적어 주세요.</p>
       <div id="fx" class="fx ${e.currency === t.baseCurrency ? 'hidden' : ''}">
         <div class="chips fx-src hidden" id="fx-src" role="radiogroup" aria-label="환율 기준">
           <button type="button" class="chip sm" role="radio" data-fxsrc="cash">💵 내 환전 환율</button>
@@ -1710,21 +1721,27 @@ function expenseSheet(exp) {
       if (thumbUrl?.startsWith('blob:')) URL.revokeObjectURL(thumbUrl);
       thumbUrl = st.photo ? URL.createObjectURL(st.photo) : st.receipt ? await store.receiptUrl(st.receipt).catch(() => null) : null;
       thumb.classList.toggle('hidden', !thumbUrl);
+      el.querySelector('#rc-hint').classList.toggle('hidden', !st.photo); // 앨범에서 고르면 지출이 생기는 줄 아는 경우가 있어서 (10/19 테스터)
       thumb.innerHTML = thumbUrl ? `<img src="${esc(thumbUrl)}" alt="영수증"><button type="button" class="rc-x" aria-label="사진 빼기">×</button>` : '';
       if (!thumbUrl) return;
       thumb.querySelector('img').onclick = () => showPhoto(thumbUrl);
       thumb.querySelector('.rc-x').onclick = () => { st.photo = null; st.receipt = null; renderThumb(); };
     };
-    const choose = async (source) => {
-      const raw = await pickPhoto(source);
-      if (!raw) return;
+    const attachPhoto = async (raw) => {
       try { st.photo = await compressImage(raw); } catch { return toast('사진을 읽지 못했어요'); }
       haptic('tap');
       renderThumb();
     };
+    const choose = async (source) => {
+      savePhotoDraft(t, exp, f, st); // 카메라를 띄운 사이 앱이 꺼져도 다시 열 수 있게
+      const raw = await pickPhoto(source);
+      clearPhotoDraft();
+      if (raw) attachPhoto(raw);
+    };
     el.querySelector('#rc-camera').onclick = () => choose('camera');
     el.querySelector('#rc-gallery').onclick = () => choose('gallery');
     renderThumb();
+    if (draft?.photo) attachPhoto(draft.photo);
 
     el.querySelectorAll('[data-split]').forEach((b) => {
       b.onclick = () => {
@@ -1798,7 +1815,7 @@ function expenseSheet(exp) {
         showSrc(v === String(tidy(exchangeRate(t, c) * rateUnit(c))) ? 'cash' : r && v === String(tidy(r.rate * rateUnit(c))) ? 'ref' : null);
       }
     };
-    if (editing) f.dataset.autoRateFor = e.currency;
+    if (editing || draft?.rate) f.dataset.autoRateFor = e.currency; // 적어 둔 환율을 참고 환율로 덮어쓰지 않게
     f.currency.onchange = () => { f.dataset.autoRateFor = ''; f.rate.value = ''; updateFx(); refresh(); };
     // 천 단위 쉼표 — 끝에서 타이핑할 때만 다시 써서 커서가 튀지 않게
     const withCommas = (v) => {
@@ -1821,7 +1838,7 @@ function expenseSheet(exp) {
       } catch (err) { report(err); }
     };
     updateFx(); refresh();
-    if (!editing) setTimeout(() => f.amount.focus(), 50); // 금액부터 바로 입력
+    if (!editing && !draft) setTimeout(() => f.amount.focus(), 50); // 금액부터 바로 입력
 
     f.onsubmit = async (ev) => {
       ev.preventDefault();
@@ -1890,6 +1907,42 @@ function expenseSheet(exp) {
       }
     };
   });
+}
+
+// ───────── 사진을 고르는 사이 앱이 꺼졌을 때 (10/19) ─────────
+// 카메라 앱이 떠 있는 동안 안드로이드가 메모리를 확보하려고 우리 앱을 끌 수 있다. 쓰던 지출을 이 폰에 적어 두고, 다시 켜지면 사진과 함께 연다
+const PHOTO_DRAFT_KEY = 'enbbang:photodraft';
+function savePhotoDraft(t, exp, f, st) {
+  if (!isApp) return;
+  const c = f.currency.value;
+  try {
+    localStorage.setItem(PHOTO_DRAFT_KEY, JSON.stringify({
+      at: Date.now(), tripId: t.id, expId: exp?.id || null,
+      title: f.title.value, date: f.date.value, amount: f.amount.value, currency: c,
+      rate: c === t.baseCurrency ? null : (parseAmount(f.rate.value) / rateUnit(c)) || null,
+      baseOverride: f.baseOverride.value.trim() ? parseAmount(f.baseOverride.value) : null,
+      payerId: st.payerId, mode: st.mode, sel: [...st.sel], parts: [...st.parts], exact: [...st.exact],
+      cat: st.cat, catTouched: st.catTouched, receipt: st.receipt,
+    }));
+  } catch { /* 저장 불가 — 사진만 못 살린다 */ }
+}
+function clearPhotoDraft() { try { localStorage.removeItem(PHOTO_DRAFT_KEY); } catch { /* 무시 */ } }
+async function resumePhotoDraft() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(PHOTO_DRAFT_KEY) || 'null'); } catch { /* 무시 */ }
+  if (!d) return;
+  clearPhotoDraft();
+  if (!(Date.now() - d.at < 30 * 60e3)) return; // 오래된 건 버린다
+  const photo = await restoredPhoto();
+  const h = `#/t/${d.tripId}`;
+  if (location.hash !== h) location.hash = h;
+  for (let i = 0; i < 100 && view.trip?.id !== d.tripId; i++) await new Promise((r) => setTimeout(r, 100));
+  if (view.trip?.id !== d.tripId) return;
+  await new Promise((r) => setTimeout(r, 300)); // 방 화면이 다 그려진 뒤에
+  const exp = d.expId ? view.trip.expenses.find((x) => x.id === d.expId) : undefined;
+  if (d.expId && !exp) return;
+  expenseSheet(exp, { ...d, photo });
+  toast(photo ? '앱이 잠깐 꺼졌다 켜졌어요. 찍은 사진을 붙여 뒀으니 이어서 저장하세요' : '앱이 잠깐 꺼졌다 켜졌어요. 쓰던 지출을 다시 열었으니 사진을 다시 골라 주세요');
 }
 
 // ───────── 탭 스와이프 (지출 ↔ 정산 ↔ 멤버) ─────────
@@ -2121,4 +2174,5 @@ function firstTouch() {
     onBack,
   });
   route();
+  if (isApp) resumePhotoDraft();
 })();

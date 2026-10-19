@@ -17,15 +17,16 @@ const Camera = plug('Camera');
 
 // 영수증 사진 고르기. source: 'camera' | 'gallery'. 취소하면 null.
 // 앱은 네이티브 카메라·앨범, 웹은 파일 선택창(휴대폰 브라우저는 카메라도 고를 수 있음)
+// 10/19: 카메라 앱이 떠 있는 사이 안드로이드가 메모리를 확보하려고 우리 앱을 끄는 일이 있다(삼성폰에서 흔함 — 오류 기록 없이 '앱이 종료'로 보임).
+// 새 API(takePhoto·chooseFromGallery)는 다시 켜진 뒤 결과를 버리므로, 결과를 appRestoredResult로 돌려주는 getPhoto를 쓴다 → restoredPhoto()
+const photoBlob = async (r) => (r?.webPath ? (await fetch(r.webPath)).blob() : null);
 export async function pickPhoto(source) {
   if (isApp) {
     try {
-      const opts = { quality: 75, targetWidth: 1600, targetHeight: 1600, correctOrientation: true };
-      const r = source === 'camera'
-        ? await Camera.takePhoto(opts)
-        : (await Camera.chooseFromGallery({ ...opts, mediaType: 0, limit: 1 })).results?.[0];
-      if (!r?.webPath) return null;
-      return await (await fetch(r.webPath)).blob();
+      return await photoBlob(await Camera.getPhoto({
+        source: source === 'camera' ? 'CAMERA' : 'PHOTOS', resultType: 'uri',
+        quality: 75, width: 1600, height: 1600, correctOrientation: true, saveToGallery: false,
+      }));
     } catch { return null; } // 취소·권한 거부
   }
   return new Promise((resolve) => {
@@ -33,6 +34,20 @@ export async function pickPhoto(source) {
     if (source === 'camera') i.setAttribute('capture', 'environment');
     i.onchange = () => resolve(i.files?.[0] || null);
     i.click();
+  });
+}
+
+// 앱이 꺼졌다 다시 켜졌을 때, 꺼지기 전에 찍은 사진(없으면 null). App 플러그인이 이 신호를 듣는 쪽이 생길 때까지 붙잡아 둔다
+export function restoredPhoto(ms = 1500) {
+  if (!isApp) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let handle = null;
+    const done = (v) => { clearTimeout(timer); handle?.remove?.(); resolve(v); };
+    const timer = setTimeout(() => done(null), ms);
+    Promise.resolve(App.addListener('appRestoredResult', async (r) => {
+      if (r?.pluginId !== 'Camera' || !r.success) return done(null);
+      try { done(await photoBlob(r.data)); } catch { done(null); }
+    })).then((h) => { handle = h; });
   });
 }
 
