@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610191642';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610191642';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610191642';
+} from './settle.js?v=202610201108';
+import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610201108';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610201108';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
-} from './share.js?v=202610191642';
+} from './share.js?v=202610201108';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, restoredPhoto, compressImage, askReview,
-} from './native.js?v=202610191642';
+} from './native.js?v=202610201108';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -169,6 +169,23 @@ function renderLanding() {
     $s.classList.add('has-links');
   }
   initLandingCalc();
+  logLandingView();
+}
+
+// 소개 페이지 방문 — 세션당 한 번. 블로그·가이드 링크로 방문까지는 오는지, 와서 방을 안 만드는지 가르려고 (10/20, 013)
+// 남기는 것: 이번 방문의 utm, 들어온 사이트 주소(호스트만), 처음 연 쪽 — 사람을 알아볼 수 있는 값은 없다
+function logLandingView() {
+  try {
+    if (sessionStorage.getItem('enbbang:lv')) return;
+    sessionStorage.setItem('enbbang:lv', '1');
+  } catch { return; } // 저장이 안 되면 새로고침마다 쌓이므로 아예 남기지 않는다
+  const q = new URLSearchParams(location.search);
+  let ref = '';
+  try { const h = document.referrer && new URL(document.referrer).host; if (h && h !== location.host) ref = h.slice(0, 60); } catch { /* 무시 */ }
+  store.logEvent(null, 'landing_view', {
+    source: (q.get('utm_source') || '').slice(0, 40), medium: (q.get('utm_medium') || '').slice(0, 40),
+    campaign: (q.get('utm_campaign') || '').slice(0, 40), ref, path: location.pathname.slice(0, 40),
+  });
 }
 
 // 첫 화면 계산기 — 예시 지출(유로·코루나·포린트) 켜고 끄기 + 직접 더하기 + 인원 → 1인당 원화. 환율은 앱과 같은 참고 환율(실패하면 예시 값)
