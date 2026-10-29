@@ -6,7 +6,7 @@
 //          expenses: [{ id, title, date, amount, currency, rate, baseOverride,
 //                       payerId, shares: [{ pid, w }], device, createdAt, deletedAt }] }
 
-import { tidyTrip } from './settle.js?v=202610201111';
+import { tidyTrip } from './settle.js?v=202610291306';
 
 const LS = {
   get(k, d = null) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -39,6 +39,22 @@ function rememberTrip(trip) {
   LS.set('enbbang:recent', list.slice(0, 20));
 }
 export function recentTrips() { return LS.get('enbbang:recent', []); }
+// 최근 목록에서만 뺀다(0.6.5) — 방·'나'·총무 키는 그대로라 방 링크로 다시 들어오면 이어서 쓴다.
+// 저장본(cache)은 바로 지우지 않는다(되돌리기) — 다음 cacheTrip이 목록에 없는 것을 정리한다
+export function forgetTrip(id) {
+  const list = recentTrips();
+  const i = list.findIndex((t) => t.id === id);
+  if (i < 0) return null;
+  const [x] = list.splice(i, 1);
+  LS.set('enbbang:recent', list);
+  return { x, i };
+}
+export function unforgetTrip(r) {
+  if (!r) return;
+  const list = recentTrips().filter((t) => t.id !== r.x.id);
+  list.splice(Math.min(r.i, list.length), 0, r.x);
+  LS.set('enbbang:recent', list.slice(0, 20));
+}
 
 // ───────────────────────── 오프라인 (비행기·해외 데이터 끊김) ─────────────────────────
 // ① 마지막으로 불러온 여행방을 기기에 저장해 두고(enbbang:cache:<id>) 연결이 없으면 그걸 보여 준다
@@ -163,6 +179,12 @@ export class LocalStore {
     const t = this.#load(id);
     const p = t.participants.find((x) => x.id === pid);
     if (p && !p.joinedAt) { p.joinedAt = new Date().toISOString(); this.#save(t); }
+    return true; // 이 기기 하나뿐이라 늘 고를 수 있다
+  }
+  async releaseParticipant(id, pid) {
+    const t = this.#load(id);
+    const p = t.participants.find((x) => x.id === pid);
+    if (p) { p.joinedAt = null; this.#save(t); }
   }
   async setSettleMode(id, mode) {
     const t = this.#load(id);
@@ -254,7 +276,8 @@ export class CloudStore {
     // cid: 응답만 끊겨 서버엔 이미 들어간 경우 다시 보내도 한 건만 남게 하는 표시
     // 송금 "보냈어요"는 같은 송금이면 같은 표시(transferKey)를 쓴다 — 두 사람이 눌러도 한 건만 남게(009)
     const cid = exp.cid || `tmp_${uid(10)}`;
-    const body = { ...exp, cid };
+    // 송금 기록은 보낸 사람·총무만 남긴다(014) — 총무 키는 지출 안에 실어 보낸다(옛 앱과 인자를 맞추려고)
+    const body = exp.kind === 'transfer' && me.adminKey(id) ? { ...exp, cid, admin: me.adminKey(id) } : { ...exp, cid };
     // 앞서 못 보낸 게 있으면 순서를 지키려고 이것도 대기열 뒤에 붙인다
     if (!outbox.all().length) {
       try {
@@ -371,8 +394,15 @@ export class CloudStore {
     await this.#rpc('enb_remove_participant', { p_trip: id, p_pid: pid, p_admin: me.adminKey(id) || '' });
     this.#ping(id);
   }
+  // 이미 다른 기기가 고른 이름이면 false (014). 옛 서버는 아무것도 안 돌려준다 → 고른 것으로 본다
   async claimParticipant(id, pid) {
-    await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid, p_device: deviceId() });
+    const ok = await this.#rpc('enb_claim_participant', { p_trip: id, p_pid: pid, p_device: deviceId() });
+    this.#ping(id);
+    return ok !== false;
+  }
+  // 이름 풀어 주기: 그 이름을 고른 기기나 총무만 (014)
+  async releaseParticipant(id, pid) {
+    await this.#rpc('enb_release_participant', { p_trip: id, p_pid: pid, p_device: deviceId(), p_admin: me.adminKey(id) || '' });
     this.#ping(id);
   }
   async setSettleMode(id, mode) {

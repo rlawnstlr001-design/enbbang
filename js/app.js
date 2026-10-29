@@ -2,16 +2,16 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610201111';
-import { createStore, me, recentTrips, deviceId, pendingCount } from './store.js?v=202610201111';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610201111';
+} from './settle.js?v=202610291306';
+import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202610291306';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610291306';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
-} from './share.js?v=202610201111';
+} from './share.js?v=202610291306';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, restoredPhoto, compressImage, askReview,
-} from './native.js?v=202610201111';
+} from './native.js?v=202610291306';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -111,6 +111,14 @@ const tidy = (x) => (Number(x) >= 1 ? Math.round(Number(x) * 100) / 100 : Number
 
 function nameOf(trip, pid) { return trip.participants.find((p) => p.id === pid)?.name ?? '?'; }
 const isAdmin = (trip) => !!me.adminKey(trip.id);
+// 송금 '보냈어요'는 보낸 사람·총무만 (0.6.5, 서버도 같은 규칙 014). 공금 회비·돌려주기는 공금을 만든 사람도
+const canMark = (trip, x) => {
+  if (store.mode !== 'cloud' || isAdmin(trip) || x.from === me.get(trip.id)) return true;
+  const pot = trip.participants.find((p) => p.payInfo?.pot === true);
+  return !!(pot?.mine && (x.to === pot.id || x.from === pot.id));
+};
+// 송금 표시 취소는 표시한 기기·총무만 (서버 007부터 같은 규칙)
+const canUndo = (trip, e) => store.mode !== 'cloud' || isAdmin(trip) || !!e?.mine || e?.device === deviceId();
 // 혼자 쓰는 가계부 — 따로 표시 없이 참여자가 한 명인 방. 사람을 추가하면 그대로 정산 방이 된다 (10/12)
 const isSolo = (trip) => trip.participants.length === 1;
 // 공금(회비) — 서버 변경 없이 '💰 공금'이라는 특별한 참여자로 둔다(payInfo.pot). 회비 = 멤버→공금 송금,
@@ -279,12 +287,22 @@ function renderHome() {
         <select class="input" name="base">${CURRENCIES.map((c) => `<option ${c === 'KRW' ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <button class="btn primary block" id="create-btn">여행방 만들기</button>
     </form>
-    ${recent.length ? `<div class="card recent" style="margin-top:16px"><b>최근 여행방</b>
-      ${recent.map((t) => `<a href="#/t/${esc(t.id)}"><span>${esc(t.name)}</span><span class="muted small">${new Date(t.at).toLocaleDateString('ko-KR')}</span></a>`).join('')}</div>` : ''}
+    ${recent.length ? `<div class="card recent" id="recent" style="margin-top:16px"><b>최근 여행방</b>
+      ${recent.map((t) => `<div class="recent-row"><a href="#/t/${esc(t.id)}"><span>${esc(t.name)}</span><span class="muted small">${new Date(t.at).toLocaleDateString('ko-KR')}</span></a>
+        <button type="button" class="recent-x" data-forget="${esc(t.id)}" aria-label="${esc(t.name)} 목록에서 지우기">✕</button></div>`).join('')}</div>` : ''}
     <p class="muted small" style="margin-top:24px">${store.mode === 'cloud'
       ? '링크를 받은 사람은 누구나 이 방을 보고 입력할 수 있어요. 방은 마지막 사용 후 90일 뒤 정리돼요.'
       : '로컬 모드: 이 기기에만 저장돼요. 공유 링크에는 그 시점의 내용이 담겨요.'}
       · <a href="privacy.html">개인정보처리방침</a></p>`;
+
+  // 최근 여행방 ✕: 이 기기 목록에서만 뺀다 — 방은 그대로, 링크로 다시 들어오면 이어서 쓴다 (0.6.5)
+  $app.querySelectorAll('[data-forget]').forEach((b) => {
+    b.onclick = () => {
+      const r = forgetTrip(b.dataset.forget);
+      renderHome();
+      toast('목록에서 지웠어요. 방은 그대로라 링크로 다시 들어올 수 있어요', { label: '되돌리기', run: () => { unforgetTrip(r); renderHome(); } });
+    };
+  });
 
   // 멤버 칩 입력: 이름 하나씩 추가(쉼표로 여러 명 붙여 넣어도 됨), ×로 빼기, 첫 번째가 "나"
   const members = [];
@@ -509,7 +527,7 @@ function renderList(body, t) {
           : `💸 ${esc(nameOf(t, e.payerId))} → ${esc(nameOf(t, e.shares[0]?.pid))} 송금`;
         return `${day}<div class="exp transfer" data-tid="${esc(e.id)}">
           <div class="grow"><div class="t">${label}${e.pending ? ' <span class="badge pending">저장 대기</span>' : ''}</div>
-            <div class="muted small">보냈어요 표시 · 눌러서 취소</div></div>
+            <div class="muted small">보냈어요 표시${canUndo(t, e) ? ' · 눌러서 취소' : ''}</div></div>
           <div class="amt num muted">${fmtMajor(e.amount, e.currency)}</div></div>`;
       }
       let baseLine = '';
@@ -537,7 +555,8 @@ function renderList(body, t) {
     el.onclick = () => expenseSheet(t.expenses.find((e) => e.id === el.dataset.eid));
   });
   body.querySelectorAll('[data-tid]').forEach((el) => {
-    el.onclick = () => undoTransfer(t, el.dataset.tid);
+    el.onclick = () => (canUndo(t, t.expenses.find((x) => x.id === el.dataset.tid))
+      ? undoTransfer(t, el.dataset.tid) : toast('송금 표시는 표시한 사람이나 총무만 취소할 수 있어요'));
   });
   bindInviteCard(body, t);
   bindExchangeCard(body, t);
@@ -603,8 +622,9 @@ function renderSettle(body, t, result) {
       <span class="amt num">${fmt(x.amount, cur)}</span>
       <div class="links">
         ${x.done
-          ? `<span class="paid">✓ 보냈어요</span><button class="btn sm ghost" data-undo="${i}">취소</button>`
-          : `<button class="btn sm send" data-paid="${i}">보냈어요 ✓</button>
+          ? `<span class="paid">✓ 보냈어요</span>${canUndo(t, t.expenses.find((e) => e.id === x.paymentId)) ? `<button class="btn sm ghost" data-undo="${i}">취소</button>` : ''}`
+          : `${canMark(t, x) ? `<button class="btn sm send" data-paid="${i}">보냈어요 ✓</button>`
+              : `<span class="muted small mark-who">${esc(nameOf(t, x.from))}님이 보내고 표시해요</span>`}
              ${pot && x.from === pot.id ? '' : `<button class="btn sm ghost" data-remind="${i}">🔔 리마인드</button>`}
              ${isApp && x.from === me.get(t.id) ? `<button class="btn sm ghost" data-alarm="${i}">⏰ 내일 알림</button>` : ''}
              <button class="btn sm ghost" data-copy-amt="${i}">금액 복사</button>
@@ -994,22 +1014,40 @@ document.addEventListener('keydown', (e) => {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 
+// 다른 폰에서 이미 고른 이름은 보이지 않는다 (0.6.5 — 서버가 claimed·mine만 알려 준다, 014)
+const takenByOther = (p) => store.mode === 'cloud' && p.claimed && !p.mine;
 function pickIdentity() {
   const t = view.trip;
+  const free = humans(t).filter((p) => !takenByOther(p));
+  const hidden = humans(t).length - free.length;
   openSheet(`
     <h2>${esc(t.name)}</h2>
     <p class="muted">이 방에서 누구세요? 고르면 이 기기에 기억해 둘게요.</p>
-    <div class="chips">${humans(t).map((p) => `<button class="chip" data-pid="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
+    <div class="chips">${free.map((p) => `<button class="chip" data-pid="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
+    ${hidden ? `<p class="muted small">다른 폰에서 이미 고른 이름 ${hidden}명은 안 보여요. 내 이름이 안 보이면 총무에게 '이름 풀어 주기'를 부탁하거나, 전에 쓰던 폰에서 '📱 다른 기기에서 이어서 쓰기'를 눌러 주세요.</p>` : ''}
     <form class="row" id="newme" style="margin-top:16px">
       <input class="input grow" name="n" maxlength="30" placeholder="목록에 없으면 이름 입력">
       <button class="btn primary">참여</button></form>`, (el, scrim) => {
     if (!me.get(t.id)) scrim.dataset.locked = '1';
-    const done = (pid) => {
+    let busy = false;
+    const done = async (pid) => {
+      if (busy) return;
+      busy = true;
+      let ok = true;
+      try { ok = await store.claimParticipant(t.id, pid); }
+      catch (err) { if (!isNetError(err)) { busy = false; return report(err); } } // 연결이 없으면 일단 이 기기에 기억
+      if (!ok) { // 그 사이 다른 폰이 먼저 골랐다
+        const n = nameOf(t, pid);
+        try { view.trip = await store.getTrip(t.id); } catch { /* 지금 화면 기준 */ }
+        closeSheet(); renderTrip();
+        toast(`방금 다른 폰에서 '${n}' 이름을 골랐어요. 다시 골라 주세요`);
+        return pickIdentity();
+      }
       const first = !me.get(t.id);
       me.set(t.id, pid);
       if (first) store.logEvent(t.id, 'joined', { creator: isAdmin(t) });
-      store.claimParticipant(t.id, pid).catch(() => {});
       closeSheet();
+      try { view.trip = await store.getTrip(t.id); } catch { /* 연결이 없으면 지금 화면 그대로 */ }
       renderTrip();
     };
     el.querySelectorAll('[data-pid]').forEach((b) => { b.onclick = () => done(b.dataset.pid); });
@@ -1018,6 +1056,7 @@ function pickIdentity() {
       const n = new FormData(e.target).get('n').trim();
       if (!n) return;
       const exist = t.participants.find((p) => p.name === n);
+      if (exist && takenByOther(exist)) return toast(`'${n}' 이름은 다른 폰에서 이미 골랐어요. 본인이면 총무에게 '이름 풀어 주기'를 부탁해 주세요`);
       if (exist) return done(exist.id);
       const similar = t.participants.find((p) => p.name.includes(n) || n.includes(p.name));
       if (similar && !confirm(`'${similar.name}'님이 이미 있어요. 같은 분이면 '취소'를 누르고 이름을 골라 주세요.\n'${n}'(으)로 새로 참여할까요?`)) return;
@@ -1083,12 +1122,13 @@ function tidySheet(t) {
   const used = (pid) => t.expenses.some((e) => e.payerId === pid || e.shares.some((s) => s.pid === pid));
   openSheet(`
     <h2>참여자 정리</h2>
-    <p class="muted small">같은 사람이 두 번 들어왔으면 <b>합치기</b>, 잘못 넣은 사람은 <b>빼기</b>(지출이 없을 때만).</p>
+    <p class="muted small">같은 사람이 두 번 들어왔으면 <b>합치기</b>, 잘못 넣은 사람은 <b>빼기</b>(지출이 없을 때만). 누가 남의 이름을 골랐으면 <b>이름 풀기</b> — 그 이름을 다시 고를 수 있게 돼요.</p>
     <div class="stack">${t.participants.map((p) => `
       <div class="tidy-row">
         <b>${esc(p.name)}</b>
         <span class="row">
           <button type="button" class="btn sm ghost" data-rn="${esc(p.id)}">이름</button>
+          ${p.claimed && !isPot(p) ? `<button type="button" class="btn sm ghost" data-rl="${esc(p.id)}">이름 풀기</button>` : ''}
           ${t.participants.length > 1 ? `<button type="button" class="btn sm ghost" data-mg="${esc(p.id)}">합치기</button>` : ''}
           ${!used(p.id) && t.participants.length > 1 ? `<button type="button" class="btn sm ghost" data-rm="${esc(p.id)}">빼기</button>` : ''}
         </span>
@@ -1103,6 +1143,17 @@ function tidySheet(t) {
         if (!n || n === p.name) return;
         if (t.participants.some((x) => x.name === n)) return toast('같은 이름이 이미 있어요');
         try { await store.updateParticipant(t.id, p.id, { name: n.slice(0, 30) }); await after('이름을 바꿨어요'); } catch (err) { report(err); }
+      };
+    });
+    el.querySelectorAll('[data-rl]').forEach((b) => {
+      b.onclick = async () => {
+        const p = t.participants.find((x) => x.id === b.dataset.rl);
+        if (!confirm(`'${p.name}' 이름을 풀까요? 그 이름을 고른 폰은 이름을 다시 골라야 해요. 적은 지출·송금은 그대로예요.`)) return;
+        try {
+          await store.releaseParticipant(t.id, p.id);
+          if (me.get(t.id) === p.id) me.set(t.id, null);
+          await after(`'${p.name}' 이름을 풀었어요. 이제 다른 사람이 고를 수 있어요`);
+        } catch (err) { report(err); }
       };
     });
     el.querySelectorAll('[data-rm]').forEach((b) => {
@@ -1320,7 +1371,10 @@ function duesSheet(t) {
   const pot = potOf(t);
   if (!pot) return;
   const B = t.baseCurrency;
-  const people = humans(t).filter((p) => !p.excluded);
+  // 남의 회비는 공금을 만든 사람·총무만 적는다 (0.6.5, 014) — 나머지는 내 회비만
+  const keeper = store.mode !== 'cloud' || isAdmin(t) || pot.mine;
+  const people = humans(t).filter((p) => !p.excluded && (keeper || p.id === me.get(t.id)));
+  if (!people.length) return toast('회비는 공금을 만든 사람이나 총무가 적어요');
   openSheet(`
     <h2>💰 회비 걷기</h2>
     <p class="muted small">각자 공금에 낸 돈을 적어요. 같은 금액이면 위 칸만 넣으세요. 회비는 ${B}로 적고, 나중에 더 걷으면 다시 적으면 돼요.</p>

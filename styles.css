@@ -85,6 +85,14 @@ label.field > span, div.field > span { display: block; font-size: 13px; color: v
 .hero h1 { font-size: 30px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -.5px; }
 .hero p { margin: 0; color: var(--muted); }
 .recent a { display: flex; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--line); text-decoration: none; color: var(--text); }
+/* 최근 여행방 ✕ (0.6.5) — 이 기기 목록에서만 뺀다 */
+.recent .recent-row { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--line); }
+.recent .recent-row a { flex: 1; min-width: 0; border-top: 0; gap: 8px; }
+.recent .recent-row a span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent .recent-row a span:last-child { flex: none; white-space: nowrap; }
+.recent-x { flex: none; width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.recent-x:hover, .recent-x:focus-visible { background: var(--line); color: var(--text); }
+.mark-who { align-self: center; }
 
 /* 요약 */
 .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
