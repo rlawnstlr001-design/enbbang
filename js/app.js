@@ -2,16 +2,17 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202610291306';
-import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202610291306';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202610291306';
+} from './settle.js?v=202611021322';
+import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202611021322';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202611021322';
+import { parseCardSmsBatch } from './smsparse.js?v=202611021322';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
-} from './share.js?v=202610291306';
+} from './share.js?v=202611021322';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, restoredPhoto, compressImage, askReview,
-} from './native.js?v=202610291306';
+} from './native.js?v=202611021322';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -1635,6 +1636,7 @@ function expenseSheet(exp, draft) {
 
   openSheet(`
     <h2>${editing ? '지출 수정' : '지출 추가'}</h2>
+    ${editing ? '' : '<button type="button" class="btn sm ghost sms-entry" id="sms-in">💳 결제 문자 붙여넣어 한 번에 넣기</button>'}
     <form class="stack" id="ef">
       <div class="amount-row">
         <input class="input amount num" name="amount" inputmode="decimal" autocomplete="off" value="${esc(e.amount)}" placeholder="0" aria-label="금액" required>
@@ -1681,6 +1683,7 @@ function expenseSheet(exp, draft) {
         ${canEdit ? `<button class="btn primary grow">${editing ? '저장' : '추가'}</button>` : ''}
       </div>
     </form>`, (el) => {
+    el.querySelector('#sms-in')?.addEventListener('click', () => { closeSheet(); smsSheet(t); });
     const f = el.querySelector('#ef');
     const fx = el.querySelector('#fx');
     const cur = () => f.currency.value;
@@ -1976,6 +1979,122 @@ function expenseSheet(exp, draft) {
         submitBtn.textContent = editing ? '저장' : '추가';
         report(err);
       }
+    };
+  });
+}
+
+// ───────── 결제 문자 붙여넣기 (0.6.6, 11/2) ─────────
+// 테스터 의견 "카드내역 불러와서 고를 수 있으면 편하겠다"(10/16). 문자 읽기 권한은 Play 정책상 못 쓴다 → 복사해 붙여 넣는다.
+// 문자는 이 기기에서만 읽는다(smsparse.js). 서버에는 사용자가 고른 지출만 지금처럼 들어간다.
+function smsSheet(t) {
+  const myId = me.get(t.id);
+  const shares = t.participants.filter((p) => !p.excluded).map((p) => ({ pid: p.id, w: p.defaultW ?? 1 }));
+  const payers = [...t.participants].sort((a, b) => (isPot(b) ? 1 : 0) - (isPot(a) ? 1 : 0));
+  const canRead = !!navigator.clipboard?.readText;
+  let items = [];
+  openSheet(`
+    <h2>💳 결제 문자로 넣기</h2>
+    <p class="muted small">문자 앱에서 카드·계좌·지역상품권 결제 문자를 길게 눌러 <b>복사</b>한 뒤 아래에 붙여 넣으세요. 여러 통을 한 번에 넣어도 돼요.<br>문자는 이 폰에서만 읽고 어디에도 보내지 않아요.</p>
+    ${canRead ? '<button type="button" class="btn block" id="sms-paste">📋 복사한 문자 붙여넣기</button>' : ''}
+    <textarea class="input sms-text" id="sms-text" rows="4" placeholder="[Web발신]&#10;[○○은행]10/29 12:30:00&#10;출금&#10;12,000원" aria-label="결제 문자"></textarea>
+    <div id="sms-result"></div>
+    <div id="sms-common" class="stack hidden">
+      <label class="field"><span>낸 사람</span>
+        <select class="input" id="sms-payer">${payers.map((p) => `<option value="${esc(p.id)}" ${p.id === (myId || t.participants[0].id) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      ${isSolo(t) ? '' : `<p class="muted small">나눌 사람은 지금 기본(${shares.length}명)으로 들어가요. 넣은 뒤 지출을 눌러 하나씩 고칠 수 있어요.</p>`}
+    </div>
+    <div class="row" style="margin-top:12px"><button type="button" class="btn grow" id="sms-close">닫기</button>
+      <button type="button" class="btn primary grow" id="sms-add" disabled>넣기</button></div>`, (el) => {
+    const $txt = el.querySelector('#sms-text');
+    const $res = el.querySelector('#sms-result');
+    const $add = el.querySelector('#sms-add');
+    el.querySelector('#sms-close').onclick = closeSheet;
+    const now = new Date();
+    const fixYear = (d) => { // 문자에는 연도가 없다 — 올해로 보고, 미래 날짜면 작년
+      if (!d) return today();
+      const tomorrow = new Date(now.getTime() + 864e5).toLocaleDateString('sv-SE');
+      return d > tomorrow ? `${now.getFullYear() - 1}${d.slice(4)}` : d;
+    };
+    const titleOf = (x) => x.merchant || (x.voucher ? `${x.voucher} 결제` : x.kind === 'withdraw' ? '계좌 출금' : '카드 결제');
+    const dupOf = (x) => t.expenses.some((e) => !e.deletedAt && e.kind !== 'transfer' && e.date === x.date
+      && e.currency === x.currency && Number(e.amount) === x.amount);
+    const syncAdd = () => {
+      const n = items.filter((x) => x.on).length;
+      $add.disabled = !n;
+      $add.textContent = n ? `${n}건 넣기` : '넣기';
+    };
+    const draw = (r) => {
+      el.querySelector('#sms-common').classList.toggle('hidden', !items.length);
+      if (!$txt.value.trim()) { $res.innerHTML = ''; syncAdd(); return; }
+      const notes = [r.skipped && `결제 문자가 아닌 ${r.skipped}통은 뺐어요`, r.canceled && `취소된 결제 ${r.canceled}건은 짝을 찾아 뺐어요`].filter(Boolean);
+      $res.innerHTML = items.length ? `<div class="sms-list">${items.map((x, i) => `
+        <div class="sms-item ${x.on ? '' : 'off'}">
+          <input type="checkbox" data-on="${i}" ${x.on ? 'checked' : ''} aria-label="${esc(x.title)} 넣기">
+          <div class="grow">
+            <input class="input sm" data-title="${i}" maxlength="100" value="${esc(x.title)}" aria-label="내용">
+            <div class="muted small">${esc(x.date.slice(5).replace('-', '/'))}${x.time ? ` ${esc(x.time)}` : ''}
+              ${x.kind === 'withdraw' ? ' · <span class="badge">계좌 출금</span>' : ''}${x.dup ? ' · <span class="badge broken">이미 있는 것 같아요</span>' : ''}</div>
+          </div>
+          <b class="num">${fmtMajor(x.amount, x.currency)}</b>
+        </div>`).join('')}</div>
+        ${items.some((x) => x.kind === 'withdraw') ? '<p class="muted small">계좌 출금 중 친구에게 보낸 돈이면 체크를 빼 주세요(송금은 정산 탭에서 따로 표시해요).</p>' : ''}
+        ${notes.length ? `<p class="muted small">${notes.join(' · ')}</p>` : ''}`
+        : `<p class="muted small">결제 문자를 찾지 못했어요. 금액이 들어 있는 문자를 붙여 넣어 주세요.${notes.length ? ` (${notes.join(' · ')})` : ''}</p>`;
+      $res.querySelectorAll('[data-on]').forEach((c) => {
+        c.onchange = () => { items[+c.dataset.on].on = c.checked; c.closest('.sms-item').classList.toggle('off', !c.checked); syncAdd(); };
+      });
+      $res.querySelectorAll('[data-title]').forEach((inp) => { inp.oninput = () => { items[+inp.dataset.title].title = inp.value; }; });
+      syncAdd();
+    };
+    const parse = () => {
+      const r = parseCardSmsBatch($txt.value, { year: now.getFullYear() });
+      items = r.items.map((x) => {
+        const it = { ...x, date: fixYear(x.date) };
+        it.title = titleOf(it);
+        it.dup = dupOf(it);
+        it.on = !it.dup && (CURRENCIES.includes(it.currency));
+        return it;
+      });
+      draw(r);
+    };
+    let h;
+    $txt.addEventListener('input', () => { clearTimeout(h); h = setTimeout(parse, 250); });
+    el.querySelector('#sms-paste')?.addEventListener('click', async () => {
+      try {
+        const v = await navigator.clipboard.readText();
+        if (!v?.trim()) return toast('복사한 내용이 없어요. 문자를 길게 눌러 복사해 주세요');
+        $txt.value = $txt.value.trim() ? `${$txt.value.trim()}\n\n${v}` : v;
+        parse();
+      } catch { toast('붙여넣기를 못 했어요. 아래 칸을 길게 눌러 붙여 넣어 주세요'); $txt.focus(); }
+    });
+    $add.onclick = async () => {
+      const pick = items.filter((x) => x.on);
+      if (!pick.length || $add.disabled) return;
+      $add.disabled = true;
+      $add.textContent = '넣는 중…';
+      const payerId = el.querySelector('#sms-payer').value;
+      let done = 0;
+      try {
+        for (const x of pick) {
+          let rate = null;
+          if (x.currency !== t.baseCurrency) {
+            rate = exchangeRate(t, x.currency) || (await getRate(x.currency, t.baseCurrency).catch(() => null))?.rate || null;
+            if (!rate) { toast(`${x.currency} 환율을 못 불러와 ${done}건만 넣었어요. 나머지는 연결된 뒤 다시 해 주세요`); break; }
+          }
+          const title = (x.title || titleOf(x)).trim().slice(0, 100) || '결제';
+          await store.addExpense(t.id, {
+            title, date: x.date, amount: x.amount, currency: x.currency, rate, baseOverride: null,
+            payerId, shares, category: guessCategory(title),
+          });
+          done++;
+        }
+      } catch (err) { report(err); }
+      if (!done) { $add.disabled = false; syncAdd(); return; }
+      store.logEvent(t.id, 'sms_import', { count: done, kinds: [...new Set(pick.slice(0, done).map((x) => x.kind))].join(',') });
+      try { view.trip = await store.getTrip(t.id); } catch { /* 연결이 없으면 대기열 표시 그대로 */ }
+      closeSheet(); renderTrip();
+      feedback('add');
+      toast(pendingCount(t.id) ? `${done}건 넣었어요 · 연결되면 자동으로 저장돼요` : `${done}건 넣었어요. 지출을 눌러 나눌 사람을 고칠 수 있어요`);
     };
   });
 }

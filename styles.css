@@ -486,3 +486,14 @@ html.landing body { background: #FFFFFF; }
 .budget-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
 .budget-card.over .budget-bar i { background: var(--minus, #D9480F); }
 .list-tools:empty { display: none; }
+
+/* 결제 문자 붙여넣기 (0.6.6) */
+.sms-entry { margin: -6px 0 12px; }
+.sms-text { width: 100%; min-height: 96px; resize: vertical; font-size: 14px; margin-top: 10px; }
+.sms-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.sms-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; }
+.sms-item.off { opacity: .55; }
+.sms-item input[type=checkbox] { width: 22px; height: 22px; flex: none; }
+.sms-item .grow { min-width: 0; }
+.sms-item .input.sm { padding: 6px 10px; font-size: 15px; min-height: 0; width: 100%; }
+.sms-item b { flex: none; }
