@@ -1,18 +1,18 @@
-// 엔빵 웹 베타 — 화면 로직 (프레임워크 없음, 해시 라우팅)
+// 트립N빵 웹·앱 — 화면 로직 (프레임워크 없음, 해시 라우팅)
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202611021322';
-import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202611021322';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202611021322';
-import { parseCardSmsBatch } from './smsparse.js?v=202611021322';
+} from './settle.js?v=202611041427';
+import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202611041427';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202611041427';
+import { parseCardSmsBatch } from './smsparse.js?v=202611041427';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
-} from './share.js?v=202611021322';
+} from './share.js?v=202611041427';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, restoredPhoto, compressImage, askReview,
-} from './native.js?v=202611021322';
+} from './native.js?v=202611041427';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -261,7 +261,7 @@ function renderHome() {
   $app.innerHTML = `
     <div class="hero">
       <div class="row between"><span class="brand"><i>N</i>트립N빵</span>
-        <span class="row"><span class="badge">${store.mode === 'cloud' ? '베타' : '로컬 모드'}</span>${GEAR}</span></div>
+        <span class="row">${store.mode === 'cloud' ? '' : '<span class="badge">로컬 모드</span>'}${GEAR}</span></div>
       <h1>여행 정산,<br>링크 하나로 끝.</h1>
       <p>같이 쓴 돈을 다 같이 적으면, 누가 누구에게 얼마 보낼지 <b>최소 송금</b>으로 정리해 드려요.</p>
     </div>
