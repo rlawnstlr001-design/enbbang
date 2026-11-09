@@ -497,3 +497,7 @@ html.landing body { background: #FFFFFF; }
 .sms-item .grow { min-width: 0; }
 .sms-item .input.sm { padding: 6px 10px; font-size: 15px; min-height: 0; width: 100%; }
 .sms-item b { flex: none; }
+
+/* 첫 지출 안내 (0.6.7) */
+.first-exp { margin-top: 12px; }
+.first-exp p { margin: 6px 0 12px; }

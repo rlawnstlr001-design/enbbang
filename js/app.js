@@ -2,17 +2,17 @@
 import {
   settle, expenseBaseMinor, decimalsOf, splitMinor, toMinor, fromMinor, CATEGORIES, guessCategory, categoryTotals,
   transferKey, brokenExpenses, guessCurrency, exchangeRate,
-} from './settle.js?v=202611041427';
-import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202611041427';
-import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202611041427';
-import { parseCardSmsBatch } from './smsparse.js?v=202611041427';
+} from './settle.js?v=202611091154';
+import { createStore, me, recentTrips, forgetTrip, unforgetTrip, deviceId, pendingCount, isNetError } from './store.js?v=202611091154';
+import { getRate, RATE_ATTRIBUTION } from './rates.js?v=202611091154';
+import { parseCardSmsBatch } from './smsparse.js?v=202611091154';
 import {
   encodeSnapshot, decodeSnapshot, fmt, fmtMajor, settlementText, settlementImage, transferLinks, reminderText, friendly, tripSummaryImage,
-} from './share.js?v=202611041427';
+} from './share.js?v=202611091154';
 import {
   isApp, SITE, nativeShare, nativeShareImage, haptic, feedback, scheduleReminder, initNative,
   getSettings, setSetting, applyTheme, pickPhoto, restoredPhoto, compressImage, askReview,
-} from './native.js?v=202611041427';
+} from './native.js?v=202611091154';
 
 // 유럽은 나라를 옮겨 다니며 통화가 섞이는 곳 — 비유로권 통화를 유로 옆에 모아 둔다 (10/12)
 const CURRENCIES = ['KRW', 'JPY', 'USD', 'EUR', 'GBP', 'CHF', 'CZK', 'HUF', 'PLN', 'DKK', 'SEK', 'NOK', 'ISK', 'RON', 'TRY',
@@ -516,7 +516,10 @@ function renderList(body, t) {
     <div class="row list-tools">${getBudget(t) ? '' : '<button type="button" class="btn sm ghost" data-budget-open>🎯 예산 정하기</button>'}${fxUsed(t) ? `<button type="button" class="btn sm ghost" data-fx-open>💱 환전 기록${t.exchanges.length ? ` ${t.exchanges.length}건` : ''}</button>` : ''}</div>
     ${live.length > 4 ? `<input class="input" id="q" type="search" placeholder="검색 (내용·낸 사람)" value="${esc(view.q)}">` : ''}
     ${curLine}
-    ${!spends.length ? `<div class="empty">아직 지출이 없어요.<br>아래 <b>＋ 지출</b>로 첫 항목을 넣어 보세요.</div>` : ''}
+    ${!spends.length ? `<div class="card first-exp"><b>✏️ 첫 지출 하나만 적어 볼까요?</b>
+      <p class="muted small">${isSolo(t) ? '아무거나 하나 적으면 날짜별 표로 바로 정리돼요.' : '저녁값처럼 아무거나 하나 적으면 누가 누구에게 얼마 보낼지 바로 계산돼요.'} 나중에 고치거나 지울 수 있어요.</p>
+      <button type="button" class="btn primary block" id="first-exp">첫 지출 적기</button>
+      <button type="button" class="btn ghost block" id="first-sms" style="margin-top:8px">💳 결제 문자 붙여넣기</button></div>` : ''}
     ${list.map((e) => {
       const day = e.date !== lastDay ? `<div class="day">${esc(dayLabel(e.date, start))}</div>` : '';
       lastDay = e.date;
@@ -545,6 +548,8 @@ function renderList(body, t) {
         <div class="amt num">${fmtMajor(e.amount, e.currency)}${baseLine}</div></div>`;
     }).join('')}`;
 
+  body.querySelector('#first-exp')?.addEventListener('click', () => expenseSheet());
+  body.querySelector('#first-sms')?.addEventListener('click', () => smsSheet(t));
   const qi = body.querySelector('#q');
   if (qi) qi.oninput = () => {
     view.q = qi.value;
@@ -1965,6 +1970,8 @@ function expenseSheet(exp, draft) {
         } else {
           data.receipt = st.receipt; // 그대로 두거나, ×로 뺐으면 null
         }
+        // 이 방의 첫 지출이면 저장 뒤 정산 결과로 이어 준다 (11/9 — 방은 만드는데 지출까지 안 가는 경우가 많다)
+        const wasFirst = !editing && !isSolo(t) && !t.expenses.some((x) => !x.deletedAt && x.kind !== 'transfer');
         const saved = editing ? await store.updateExpense(t.id, exp.id, data) : await store.addExpense(t.id, data);
         try { localStorage.setItem(`enbbang:lastcur:${t.id}`, c); } catch { /* 무시 */ }
         view.trip = await store.getTrip(t.id);
@@ -1973,6 +1980,7 @@ function expenseSheet(exp, draft) {
         const done = editing ? '저장했어요' : '추가했어요';
         if (photoSkipped) toast(`${done} · 사진은 인터넷이 연결되면 다시 붙여 주세요`);
         else if (saved?.pending || pendingCount(t.id)) toast(`${done} · 연결되면 자동으로 저장돼요`);
+        else if (wasFirst) toast(`${done}! 누가 얼마 보낼지 바로 볼 수 있어요`, { label: '정산 보기', run: () => goTab('settle') });
         else toast(done);
       } catch (err) {
         submitBtn.disabled = false;
